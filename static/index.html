@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pixal3D Local</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/three/build/three.module.js",
+          "three/addons/": "/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="controls">
+        <header class="brand">
+          <div>
+            <h1>Pixal3D Local</h1>
+            <p>Image to textured GLB on this PC</p>
+          </div>
+          <button id="refresh-status" class="icon-button" title="Refresh status" type="button">↻</button>
+        </header>
+
+        <section class="status-panel" aria-label="Installation status">
+          <div class="status-row">
+            <span>GPU</span>
+            <strong id="gpu-status">Checking...</strong>
+          </div>
+          <div class="status-row">
+            <span>Model files</span>
+            <strong id="model-status">Checking...</strong>
+          </div>
+          <div class="status-row">
+            <span>Pixal3D engine</span>
+            <strong id="engine-status">Checking...</strong>
+          </div>
+          <p id="setup-note" class="setup-note"></p>
+        </section>
+
+        <form id="generate-form" class="form">
+          <label class="drop-zone" id="drop-zone">
+            <input id="image-input" name="image" type="file" accept="image/*" />
+            <img id="image-preview" alt="" />
+            <span id="drop-copy">Drop image here or click to choose</span>
+          </label>
+
+          <div class="control-grid">
+            <label>
+              Seed
+              <input id="seed" name="seed" type="number" value="42" min="0" step="1" />
+            </label>
+            <label>
+              Resolution
+              <select id="resolution" name="resolution">
+                <option value="1024" selected>1024</option>
+                <option value="1536">1536</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="range-group">
+            <label for="ssSteps">Sparse steps <output id="ssStepsValue">12</output></label>
+            <input id="ssSteps" name="ssSteps" type="range" min="4" max="30" value="12" step="1" />
+          </div>
+          <div class="range-group">
+            <label for="shapeSteps">Shape steps <output id="shapeStepsValue">12</output></label>
+            <input id="shapeSteps" name="shapeSteps" type="range" min="4" max="30" value="12" step="1" />
+          </div>
+          <div class="range-group">
+            <label for="texSteps">Texture steps <output id="texStepsValue">12</output></label>
+            <input id="texSteps" name="texSteps" type="range" min="4" max="30" value="12" step="1" />
+          </div>
+
+          <details>
+            <summary>Export and backend</summary>
+            <div class="control-grid details-grid">
+              <label>
+                Decimation
+                <select id="decimation" name="decimation">
+                  <option value="5000">5k</option>
+                  <option value="10000">10k</option>
+                  <option value="30000">30k</option>
+                  <option value="50000">50k</option>
+                  <option value="100000">100k</option>
+                  <option value="200000" selected>200k</option>
+                  <option value="500000">500k</option>
+                  <option value="1000000">1M</option>
+                </select>
+              </label>
+              <label>
+                Texture
+                <select id="textureSize" name="textureSize">
+                  <option value="1024">1024</option>
+                  <option value="2048" selected>2048</option>
+                  <option value="4096">4096</option>
+                </select>
+              </label>
+              <label>
+                Attention
+                <select id="attentionBackend" name="attentionBackend">
+                  <option value="flash_attn_3" selected>flash_attn_3</option>
+                  <option value="flash_attn">flash_attn</option>
+                  <option value="xformers">xformers</option>
+                </select>
+              </label>
+              <label>
+                Max tokens
+                <input id="maxTokens" name="maxTokens" type="number" value="49152" min="8192" step="1024" />
+              </label>
+            </div>
+            <label class="check-row">
+              <input id="lowVram" name="lowVram" type="checkbox" checked />
+              Low VRAM mode
+            </label>
+          </details>
+
+          <div class="actions">
+            <button id="generate-button" class="primary-button" type="submit" disabled>Generate model</button>
+            <a id="download-link" class="secondary-button disabled" href="#" download="pixal3d-model.glb">Save GLB</a>
+          </div>
+        </form>
+      </aside>
+
+      <section class="workspace">
+        <div class="viewer-toolbar">
+          <div>
+            <strong id="job-title">No model loaded</strong>
+            <span id="job-stage">Choose an image to start.</span>
+          </div>
+          <div class="viewer-actions">
+            <button id="view-mode" class="secondary-button compact" type="button" title="Cycle model view mode">Mode: Textured</button>
+            <button id="reset-view" class="secondary-button compact" type="button">Reset view</button>
+          </div>
+        </div>
+        <div id="viewer" class="viewer">
+          <canvas id="viewer-canvas"></canvas>
+          <div id="viewer-empty" class="viewer-empty">Generated GLB will appear here.</div>
+        </div>
+        <div class="log-panel">
+          <div class="log-header">
+            <strong>Backend log</strong>
+            <span id="job-id"></span>
+          </div>
+          <pre id="log-output">Waiting for a job.</pre>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+.venv/
+.pixal3d-venv/
+.codex/
+node_modules/
+vendor/
+models/
+uploads/
+outputs/
+engine/*.log
+engine/python_path.txt
+*.pyc
+__pycache__/
+.DS_Store
+Thumbs.db
