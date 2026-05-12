@@ -247,6 +247,14 @@ summary {
   margin-top: 4px;
 }
 
+.export-status {
+  min-height: 18px;
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .primary-button,
 .secondary-button {
   min-height: 44px;

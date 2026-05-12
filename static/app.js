@@ -12,9 +12,14 @@ const jobStage = document.getElementById("job-stage");
 const jobIdElement = document.getElementById("job-id");
 const setupNote = document.getElementById("setup-note");
 const viewModeButton = document.getElementById("view-mode");
+const exportStatus = document.getElementById("export-status");
 
 let activeJobId = null;
 let pollTimer = null;
+let loadedResultUrl = null;
+let lastJob = null;
+
+const exportControlIds = ["decimation", "textureSize"];
 
 function setText(id, text, className = "") {
   const element = document.getElementById(id);
@@ -36,6 +41,64 @@ function updateRangeValue(id) {
 function renderViewMode(mode = getViewMode()) {
   viewModeButton.textContent = `Mode: ${mode.label}`;
   viewModeButton.title = mode.description;
+}
+
+function setDownloadUrl(url, enabled = true) {
+  if (!url) {
+    downloadLink.classList.add("disabled");
+    downloadLink.removeAttribute("href");
+    return;
+  }
+
+  downloadLink.href = url;
+  downloadLink.classList.toggle("disabled", !enabled);
+}
+
+function setExportControlsDisabled(disabled) {
+  exportControlIds.forEach((id) => {
+    document.getElementById(id).disabled = disabled;
+  });
+}
+
+function setExportStatus(text, className = "") {
+  exportStatus.textContent = text;
+  exportStatus.className = ["export-status", className].filter(Boolean).join(" ");
+}
+
+function formatExportParams(params) {
+  if (!params) return "";
+  const decimation = Number(params.decimation).toLocaleString();
+  return `${decimation} vertices · ${params.textureSize}px texture`;
+}
+
+function isJobBusy(job) {
+  return job.status === "queued" || job.status === "running" || job.exportStatus === "exporting";
+}
+
+async function loadResultIfReady(job) {
+  if (job.status !== "complete" || job.exportStatus === "exporting" || !job.resultUrl) {
+    return;
+  }
+  if (job.resultUrl === loadedResultUrl) {
+    setDownloadUrl(job.resultUrl, job.exportStatus !== "failed");
+    return;
+  }
+
+  await loadModel(job.resultUrl);
+  loadedResultUrl = job.resultUrl;
+  setDownloadUrl(job.resultUrl, job.exportStatus !== "failed");
+}
+
+async function handleJobUpdate(job) {
+  lastJob = job;
+  renderJob(job);
+  setExportControlsDisabled(isJobBusy(job));
+  generateButton.disabled = isJobBusy(job);
+  if (job.exportStatus === "exporting") {
+    setDownloadUrl(job.resultUrl || loadedResultUrl, false);
+  } else {
+    await loadResultIfReady(job);
+  }
 }
 
 async function refreshStatus() {
@@ -134,9 +197,12 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!imageInput.files.length) return;
 
+  lastJob = null;
+  loadedResultUrl = null;
   generateButton.disabled = true;
-  downloadLink.classList.add("disabled");
-  downloadLink.removeAttribute("href");
+  setExportControlsDisabled(true);
+  setDownloadUrl(null);
+  setExportStatus("");
   jobTitle.textContent = "Pixal3D job running";
   jobStage.textContent = "Uploading image";
   logOutput.textContent = "";
@@ -149,12 +215,13 @@ form.addEventListener("submit", async (event) => {
     const job = await response.json();
     activeJobId = job.id;
     jobIdElement.textContent = job.id.slice(0, 10);
-    renderJob(job);
+    await handleJobUpdate(job);
     startPolling();
   } catch (error) {
     jobTitle.textContent = "Job failed to start";
     jobStage.textContent = error.message;
     generateButton.disabled = false;
+    setExportControlsDisabled(false);
   }
 });
 
@@ -163,18 +230,61 @@ function startPolling() {
   pollTimer = setInterval(async () => {
     if (!activeJobId) return;
     const job = await fetch(`/api/jobs/${activeJobId}`).then((response) => response.json());
-    renderJob(job);
-    if (job.status === "complete" || job.status === "failed") {
+    await handleJobUpdate(job);
+    if (!isJobBusy(job) && (job.status === "complete" || job.status === "failed")) {
       clearInterval(pollTimer);
       pollTimer = null;
       generateButton.disabled = false;
-      if (job.status === "complete" && job.resultUrl) {
-        await loadModel(job.resultUrl);
-        downloadLink.href = job.resultUrl;
-        downloadLink.classList.remove("disabled");
-      }
+      setExportControlsDisabled(false);
     }
   }, 1500);
+}
+
+async function requestReexportFromControls() {
+  if (!activeJobId || !lastJob || lastJob.status !== "complete" || !lastJob.hasExportState) {
+    return;
+  }
+  if (lastJob.exportStatus === "exporting") {
+    return;
+  }
+
+  const decimation = document.getElementById("decimation").value;
+  const textureSize = document.getElementById("textureSize").value;
+  if (
+    String(lastJob.params.decimation) === decimation &&
+    String(lastJob.params.textureSize) === textureSize
+  ) {
+    return;
+  }
+
+  const data = new FormData();
+  data.append("decimation", decimation);
+  data.append("textureSize", textureSize);
+
+  generateButton.disabled = true;
+  setExportControlsDisabled(true);
+  setDownloadUrl(lastJob.resultUrl || loadedResultUrl, false);
+  setExportStatus("Starting export...", "warn");
+
+  try {
+    const response = await fetch(`/api/jobs/${activeJobId}/exports`, { method: "POST", body: data });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const job = await response.json();
+    await handleJobUpdate(job);
+    if (isJobBusy(job)) {
+      startPolling();
+    } else {
+      generateButton.disabled = false;
+      setExportControlsDisabled(false);
+    }
+  } catch (error) {
+    setExportStatus(`Export failed: ${error.message}`, "bad");
+    generateButton.disabled = false;
+    setExportControlsDisabled(false);
+    setDownloadUrl(loadedResultUrl, Boolean(loadedResultUrl));
+  }
 }
 
 function formatDuration(seconds) {
@@ -206,11 +316,28 @@ function completeStageText(job) {
 }
 
 function renderJob(job) {
-  jobTitle.textContent = job.status === "complete" ? "Model ready" : `Job ${job.status}`;
-  jobStage.textContent = job.status === "complete" ? completeStageText(job) : job.stage;
+  if (job.exportStatus === "exporting") {
+    jobTitle.textContent = "Updating export";
+    jobStage.textContent = job.exportStage || "Rebuilding GLB";
+    setExportStatus(`Exporting ${formatExportParams(job.pendingExport || job.params)}`, "warn");
+  } else if (job.exportStatus === "failed") {
+    jobTitle.textContent = "Export failed";
+    jobStage.textContent = job.exportStage || "Previous GLB is still loaded.";
+    setExportStatus("Export failed. Previous GLB is still loaded.", "bad");
+  } else {
+    jobTitle.textContent = job.status === "complete" ? "Model ready" : `Job ${job.status}`;
+    jobStage.textContent = job.status === "complete" ? completeStageText(job) : job.stage;
+    if (job.status === "complete") {
+      setExportStatus(`Current export: ${formatExportParams(job.params)}`, "ok");
+    }
+  }
   logOutput.textContent = job.log.length ? job.log.join("\n") : "Starting...";
   logOutput.scrollTop = logOutput.scrollHeight;
 }
+
+exportControlIds.forEach((id) => {
+  document.getElementById(id).addEventListener("change", requestReexportFromControls);
+});
 
 renderViewMode();
 refreshStatus();

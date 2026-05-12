@@ -29,6 +29,7 @@ TRELLIS2_DIR = ROOT / "vendor" / "TRELLIS.2"
 ENGINE_DIR = ROOT / "engine"
 THREE_DIR = ROOT / "node_modules" / "three"
 MIN_SAFE_DECIMATION_TARGET = 30000
+TEXTURE_SIZE_OPTIONS = {1024, 2048, 4096}
 
 for directory in (UPLOADS_DIR, OUTPUTS_DIR, MODELS_DIR, ENGINE_DIR):
     directory.mkdir(parents=True, exist_ok=True)
@@ -249,6 +250,25 @@ def _set_job(job_id: str, **values: Any) -> None:
             jobs[job_id].update(values)
 
 
+def _normalize_decimation(decimation: int) -> int:
+    return max(int(decimation), MIN_SAFE_DECIMATION_TARGET)
+
+
+def _validate_texture_size(texture_size: int) -> int:
+    texture_size = int(texture_size)
+    if texture_size not in TEXTURE_SIZE_OPTIONS:
+        raise HTTPException(status_code=400, detail="textureSize must be 1024, 2048, or 4096")
+    return texture_size
+
+
+def _export_filename(decimation: int, texture_size: int) -> str:
+    return f"model_d{decimation}_t{texture_size}.glb"
+
+
+def _output_url(job_id: str, output_path: Path) -> str:
+    return f"/outputs/{job_id}/{output_path.name}"
+
+
 def _run_generation(job_id: str) -> None:
     with jobs_lock:
         job = jobs[job_id]
@@ -257,6 +277,7 @@ def _run_generation(job_id: str) -> None:
 
     output_path = Path(job["outputPath"])
     input_path = Path(job["inputPath"])
+    state_path = Path(job["statePath"])
     model_dir = _pixal3d_model_dir()
     runner = ROOT / "app" / "pixal3d_runner.py"
 
@@ -273,6 +294,8 @@ def _run_generation(job_id: str) -> None:
         str(input_path),
         "--output",
         str(output_path),
+        "--state-output",
+        str(state_path),
         "--model-path",
         str(model_dir if (model_dir / "pipeline.json").exists() else "TencentARC/Pixal3D"),
         "--seed",
@@ -338,11 +361,110 @@ def _run_generation(job_id: str) -> None:
             status="complete",
             stage="Complete",
             finishedAt=time.time(),
-            resultUrl=f"/outputs/{job_id}/model.glb",
+            resultUrl=_output_url(job_id, output_path),
         )
     else:
         _append_log(job, f"Pixal3D exited with code {exit_code}")
         _set_job(job_id, status="failed", stage=f"Failed with code {exit_code}", finishedAt=time.time())
+
+
+def _run_export(job_id: str, decimation: int, texture_size: int, output_path: str) -> None:
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if job is None:
+        return
+
+    output_file = Path(output_path)
+    state_path = Path(job["statePath"])
+    runner = ROOT / "app" / "pixal3d_runner.py"
+
+    if not PIXAL3D_DIR.exists():
+        _set_job(job_id, exportStatus="failed", exportStage="Pixal3D repository missing", exportFinishedAt=time.time())
+        _append_log(job, f"Missing repo: {PIXAL3D_DIR}")
+        return
+    if not state_path.exists():
+        _set_job(job_id, exportStatus="failed", exportStage="Export state missing", exportFinishedAt=time.time())
+        _append_log(job, f"Missing export state: {state_path}")
+        return
+
+    cmd = _engine_python() + [
+        str(runner),
+        "--pixal3d-dir",
+        str(PIXAL3D_DIR),
+        "--state-input",
+        str(state_path),
+        "--output",
+        str(output_file),
+        "--decimation-target",
+        str(decimation),
+        "--texture-size",
+        str(texture_size),
+    ]
+
+    _append_log(job, "Export command: " + " ".join(f'"{part}"' if " " in part else part for part in cmd))
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PIXAL3D_MODELS_DIR"] = str(MODELS_DIR)
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            _append_log(job, line)
+            lower = line.lower()
+            if "loading reusable export state" in lower:
+                _set_job(job_id, exportStage="Loading export state")
+            elif "extracting" in lower or "to_glb" in lower:
+                _set_job(job_id, exportStage="Rebuilding GLB")
+            elif "sampling attributes" in lower:
+                _set_job(job_id, exportStage="Baking texture")
+            elif "finalizing" in lower or "glb saved" in lower:
+                _set_job(job_id, exportStage="Finalizing export")
+        exit_code = process.wait()
+    except Exception as exc:
+        _append_log(job, f"Export launch failed: {exc}")
+        _set_job(
+            job_id,
+            exportStatus="failed",
+            exportStage="Export launch failed",
+            exportFinishedAt=time.time(),
+            exportError=str(exc),
+        )
+        return
+
+    if exit_code == 0 and output_file.exists():
+        with jobs_lock:
+            job = jobs.get(job_id)
+            if job is not None:
+                job["params"]["decimation"] = decimation
+                job["params"]["textureSize"] = texture_size
+                job["outputPath"] = str(output_file)
+                job["resultUrl"] = _output_url(job_id, output_file)
+                job["exportStatus"] = "idle"
+                job["exportStage"] = "Export complete"
+                job["exportFinishedAt"] = time.time()
+                job["exportError"] = None
+                job["pendingExport"] = None
+    else:
+        output_file.unlink(missing_ok=True)
+        _append_log(job, f"Export exited with code {exit_code}")
+        _set_job(
+            job_id,
+            exportStatus="failed",
+            exportStage=f"Export failed with code {exit_code}",
+            exportFinishedAt=time.time(),
+            exportError=f"exit code {exit_code}",
+            pendingExport=None,
+        )
 
 
 @app.get("/")
@@ -384,8 +506,8 @@ async def create_job(
         raise HTTPException(status_code=400, detail="resolution must be 1024 or 1536")
     if attentionBackend not in ("flash_attn", "flash_attn_3", "xformers"):
         raise HTTPException(status_code=400, detail="unsupported attention backend")
-    if decimation < MIN_SAFE_DECIMATION_TARGET:
-        decimation = MIN_SAFE_DECIMATION_TARGET
+    decimation = _normalize_decimation(decimation)
+    textureSize = _validate_texture_size(textureSize)
 
     job_id = uuid.uuid4().hex
     job_upload_dir = UPLOADS_DIR / job_id
@@ -409,8 +531,15 @@ async def create_job(
         "finishedAt": None,
         "inputPath": str(input_path),
         "inputUrl": f"/uploads/{job_id}/{input_path.name}",
-        "outputPath": str(job_output_dir / "model.glb"),
+        "outputPath": str(job_output_dir / _export_filename(decimation, textureSize)),
+        "statePath": str(job_output_dir / "export_state.pt"),
         "resultUrl": None,
+        "exportStatus": "idle",
+        "exportStage": "",
+        "exportStartedAt": None,
+        "exportFinishedAt": None,
+        "exportError": None,
+        "pendingExport": None,
         "logPath": str(job_output_dir / "run.log"),
         "log": [],
         "params": {
@@ -435,6 +564,69 @@ async def create_job(
     return _public_job(job)
 
 
+@app.post("/api/jobs/{job_id}/exports")
+async def create_export(
+    job_id: str,
+    decimation: int = Form(200000),
+    textureSize: int = Form(2048),
+) -> dict[str, Any]:
+    decimation = _normalize_decimation(decimation)
+    textureSize = _validate_texture_size(textureSize)
+
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] != "complete":
+            raise HTTPException(status_code=409, detail="model generation is not complete")
+        if job.get("exportStatus") == "exporting":
+            raise HTTPException(status_code=409, detail="an export is already running")
+
+        state_path_value = job.get("statePath")
+        if not state_path_value:
+            raise HTTPException(status_code=409, detail="reusable export state is missing")
+        state_path = Path(state_path_value)
+        if not state_path.exists():
+            raise HTTPException(status_code=409, detail="reusable export state is missing")
+
+        output_path = Path(job["outputPath"]).parent / _export_filename(decimation, textureSize)
+        if output_path.exists():
+            job["params"]["decimation"] = decimation
+            job["params"]["textureSize"] = textureSize
+            job["outputPath"] = str(output_path)
+            job["resultUrl"] = _output_url(job_id, output_path)
+            job["exportStatus"] = "idle"
+            job["exportStage"] = "Export ready"
+            job["exportError"] = None
+            response = _public_job(job)
+            cached = True
+        else:
+            job["exportStatus"] = "exporting"
+            job["exportStage"] = "Starting export"
+            job["exportStartedAt"] = time.time()
+            job["exportFinishedAt"] = None
+            job["exportError"] = None
+            job["pendingExport"] = {
+                "decimation": decimation,
+                "textureSize": textureSize,
+                "outputPath": str(output_path),
+            }
+            response = _public_job(job)
+            cached = False
+
+    if cached:
+        _append_log(job, f"Reused cached export: {output_path.name}")
+    else:
+        worker = threading.Thread(
+            target=_run_export,
+            args=(job_id, decimation, textureSize, str(output_path)),
+            daemon=True,
+        )
+        worker.start()
+
+    return response
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
     with jobs_lock:
@@ -454,6 +646,13 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "finishedAt": job["finishedAt"],
         "inputUrl": job["inputUrl"],
         "resultUrl": job["resultUrl"],
+        "hasExportState": bool(job.get("statePath")) and Path(job["statePath"]).exists(),
+        "exportStatus": job.get("exportStatus", "idle"),
+        "exportStage": job.get("exportStage", ""),
+        "exportStartedAt": job.get("exportStartedAt"),
+        "exportFinishedAt": job.get("exportFinishedAt"),
+        "exportError": job.get("exportError"),
+        "pendingExport": job.get("pendingExport"),
         "params": job["params"],
         "log": job["log"][-120:],
     }

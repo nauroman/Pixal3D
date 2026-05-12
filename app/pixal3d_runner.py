@@ -42,6 +42,7 @@ IMAGE_COND_CONFIGS = {
 }
 
 MIN_SAFE_DECIMATION_TARGET = 30000
+EXPORT_STATE_VERSION = 1
 
 
 def _local_model(repo_id: str, local_name: str) -> str:
@@ -121,9 +122,11 @@ def get_camera_params_wild_moge(image_path, moge_model, device="cuda", mesh_scal
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local Pixal3D runner")
     parser.add_argument("--pixal3d-dir", required=True)
-    parser.add_argument("--image", required=True)
+    parser.add_argument("--image")
     parser.add_argument("--output", required=True)
     parser.add_argument("--model-path", default="TencentARC/Pixal3D")
+    parser.add_argument("--state-output")
+    parser.add_argument("--state-input")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resolution", type=int, choices=[1024, 1536], default=1024)
     parser.add_argument("--ss-steps", type=int, default=12)
@@ -148,6 +151,84 @@ def safe_decimation_target(decimation_target: int) -> int:
     return MIN_SAFE_DECIMATION_TARGET
 
 
+def load_torch_file(path: Path):
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
+def tensor_to_cpu(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu()
+    return value
+
+
+def save_export_state(mesh, grid_size, attr_layout, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "version": EXPORT_STATE_VERSION,
+            "mesh": {
+                "vertices": tensor_to_cpu(mesh.vertices),
+                "faces": tensor_to_cpu(mesh.faces),
+                "attrs": tensor_to_cpu(mesh.attrs),
+                "coords": tensor_to_cpu(mesh.coords),
+            },
+            "grid_size": tensor_to_cpu(grid_size),
+            "attr_layout": attr_layout,
+        },
+        output_path,
+    )
+    print(f"[ExportState] Saved reusable export state to: {output_path}")
+
+
+def to_cuda(value):
+    if isinstance(value, torch.Tensor):
+        return value.cuda()
+    return value
+
+
+def export_glb_from_state(state_path: Path, output_path: Path, decimation_target: int, texture_size: int, use_tqdm: bool = True) -> None:
+    import o_voxel
+
+    print(f"[ExportState] Loading reusable export state: {state_path}")
+    state = load_torch_file(state_path)
+    if state.get("version") != EXPORT_STATE_VERSION:
+        raise RuntimeError(f"Unsupported export state version: {state.get('version')}")
+
+    mesh = state["mesh"]
+    print("[Export] Extracting GLB from saved mesh state")
+    glb = o_voxel.postprocess.to_glb(
+        vertices=to_cuda(mesh["vertices"]),
+        faces=to_cuda(mesh["faces"]),
+        attr_volume=to_cuda(mesh["attrs"]),
+        coords=to_cuda(mesh["coords"]),
+        attr_layout=state["attr_layout"],
+        grid_size=to_cuda(state["grid_size"]),
+        aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+        decimation_target=safe_decimation_target(decimation_target),
+        texture_size=texture_size,
+        remesh=True,
+        remesh_band=1,
+        remesh_project=0,
+        use_tqdm=use_tqdm,
+    )
+    rotation = np.array(
+        [
+            [-1, 0, 0, 0],
+            [0, 0, -1, 0],
+            [0, -1, 0, 0],
+            [0, 0, 0, 1],
+        ],
+        dtype=np.float64,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    glb.apply_transform(rotation)
+    glb.export(output_path, extension_webp=True)
+    print(f"[Done] GLB saved to: {output_path}")
+
+
 def main() -> int:
     args = parse_args()
     pixal3d_dir = Path(args.pixal3d_dir).resolve()
@@ -161,10 +242,22 @@ def main() -> int:
     os.environ["FLEX_GEMM_AUTOTUNE_CACHE_PATH"] = str(pixal3d_dir / "autotune_cache.json")
     os.environ.setdefault("FLEX_GEMM_AUTOTUNER_VERBOSE", "1")
 
-    _configure_model_paths()
-
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. Pixal3D requires an NVIDIA CUDA GPU.")
+
+    if args.state_input:
+        export_glb_from_state(
+            Path(args.state_input).resolve(),
+            Path(args.output).resolve(),
+            args.decimation_target,
+            args.texture_size,
+        )
+        return 0
+
+    if not args.image:
+        raise RuntimeError("--image is required unless --state-input is provided.")
+
+    _configure_model_paths()
 
     from pixal3d.pipelines import Pixal3DImageTo3DPipeline
     import o_voxel
@@ -247,6 +340,9 @@ def main() -> int:
         max_num_tokens=args.max_num_tokens,
     )
     mesh = mesh_list[0]
+
+    if args.state_output:
+        save_export_state(mesh, _latents[2], pipeline.pbr_attr_layout, Path(args.state_output).resolve())
 
     print("[Inference] Extracting GLB")
     glb = o_voxel.postprocess.to_glb(
