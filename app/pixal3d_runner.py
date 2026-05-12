@@ -41,6 +41,8 @@ IMAGE_COND_CONFIGS = {
     },
 }
 
+MIN_SAFE_DECIMATION_TARGET = 30000
+
 
 def _local_model(repo_id: str, local_name: str) -> str:
     models_dir = Path(os.environ.get("PIXAL3D_MODELS_DIR", "models")).resolve()
@@ -133,6 +135,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attention-backend", choices=["flash_attn", "flash_attn_3", "xformers"], default="flash_attn_3")
     parser.add_argument("--low-vram", action="store_true")
     return parser.parse_args()
+
+
+def safe_decimation_target(decimation_target: int) -> int:
+    if decimation_target >= MIN_SAFE_DECIMATION_TARGET:
+        return decimation_target
+    print(
+        "[Export] decimation-target "
+        f"{decimation_target} is below the stable CuMesh UV unwrap range; "
+        f"using {MIN_SAFE_DECIMATION_TARGET} instead."
+    )
+    return MIN_SAFE_DECIMATION_TARGET
 
 
 def main() -> int:
@@ -244,7 +257,7 @@ def main() -> int:
         attr_layout=pipeline.pbr_attr_layout,
         grid_size=_latents[2],
         aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
-        decimation_target=args.decimation_target,
+        decimation_target=safe_decimation_target(args.decimation_target),
         texture_size=args.texture_size,
         remesh=True,
         remesh_band=1,

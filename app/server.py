@@ -28,6 +28,7 @@ PIXAL3D_DIR = ROOT / "vendor" / "Pixal3D"
 TRELLIS2_DIR = ROOT / "vendor" / "TRELLIS.2"
 ENGINE_DIR = ROOT / "engine"
 THREE_DIR = ROOT / "node_modules" / "three"
+MIN_SAFE_DECIMATION_TARGET = 30000
 
 for directory in (UPLOADS_DIR, OUTPUTS_DIR, MODELS_DIR, ENGINE_DIR):
     directory.mkdir(parents=True, exist_ok=True)
@@ -383,6 +384,8 @@ async def create_job(
         raise HTTPException(status_code=400, detail="resolution must be 1024 or 1536")
     if attentionBackend not in ("flash_attn", "flash_attn_3", "xformers"):
         raise HTTPException(status_code=400, detail="unsupported attention backend")
+    if decimation < MIN_SAFE_DECIMATION_TARGET:
+        decimation = MIN_SAFE_DECIMATION_TARGET
 
     job_id = uuid.uuid4().hex
     job_upload_dir = UPLOADS_DIR / job_id

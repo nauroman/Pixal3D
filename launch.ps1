@@ -20,24 +20,42 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 
+function Invoke-WslQuiet {
+    param([string[]]$Arguments)
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "SilentlyContinue"
+        $output = & wsl @Arguments 2>$null
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = @($output)
+    }
+}
+
 function Get-WslPath {
     param([string]$WindowsPath)
 
-    $value = & wsl wslpath -a $WindowsPath 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $value) {
+    $result = Invoke-WslQuiet -Arguments @("wslpath", "-a", $WindowsPath)
+    if ($result.ExitCode -ne 0 -or -not $result.Output) {
         return $null
     }
 
-    return ($value -join "`n").Trim()
+    return ($result.Output -join "`n").Trim()
 }
 
 function Get-WslIp {
-    $output = & wsl hostname -I 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $output) {
+    $result = Invoke-WslQuiet -Arguments @("hostname", "-I")
+    if ($result.ExitCode -ne 0 -or -not $result.Output) {
         return $null
     }
 
-    return (($output -join " ") -split "\s+" | Where-Object { $_ -match "^\d+\.\d+\.\d+\.\d+$" } | Select-Object -First 1)
+    return (($result.Output -join " ") -split "\s+" | Where-Object { $_ -match "^\d+\.\d+\.\d+\.\d+$" } | Select-Object -First 1)
 }
 
 function Test-WslBackend {
@@ -78,8 +96,8 @@ PY
         return $false
     }
 
-    $output = & wsl bash $wslProbeScriptPath 2>&1
-    return $LASTEXITCODE -eq 0 -and (($output -join "`n") -match "ready")
+    $result = Invoke-WslQuiet -Arguments @("bash", $wslProbeScriptPath)
+    return $result.ExitCode -eq 0 -and (($result.Output -join "`n") -match "ready")
 }
 
 function Stop-ExistingServers {
@@ -98,7 +116,7 @@ function Stop-ExistingServers {
     }
 
     if ($IncludeWsl) {
-        & wsl bash -lc "pkill -f '[u]vicorn app.server:app.*--port $Port' || true" 2>$null | Out-Null
+        Invoke-WslQuiet -Arguments @("bash", "-lc", "pkill -f '[u]vicorn app.server:app.*--port $Port' || true") | Out-Null
     }
 
     foreach ($attempt in 1..20) {
@@ -230,6 +248,7 @@ Wait-ServerReady -Process $server
 
 if (-not $NoBrowser) {
     Start-Process $Url
+    Write-Host "Opened $Url"
+} else {
+    Write-Host "Ready at $Url"
 }
-
-Write-Host "Opened $Url"
