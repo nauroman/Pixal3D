@@ -7,6 +7,9 @@ models/
 uploads/
 outputs/
 engine/*.log
+engine/*.pid
+engine/*.generated.sh
+engine/last-smoke-job.txt
 engine/python_path.txt
 *.pyc
 __pycache__/

@@ -19,6 +19,7 @@ let activeJobId = null;
 let pollTimer = null;
 let loadedResultUrl = null;
 let lastJob = null;
+let engineReady = false;
 
 const exportControlIds = ["decimation", "textureSize"];
 const stepControlIds = ["ssSteps", "shapeSteps", "texSteps"];
@@ -54,7 +55,11 @@ function syncGenerateButtonState() {
   const warning = generationProfileWarning();
   profileNote.textContent = warning;
   profileNote.classList.toggle("warn", Boolean(warning));
-  generateButton.disabled = !imageInput.files.length || Boolean(warning) || Boolean(lastJob && isJobBusy(lastJob));
+  generateButton.disabled =
+    !imageInput.files.length ||
+    !engineReady ||
+    Boolean(warning) ||
+    Boolean(lastJob && isJobBusy(lastJob));
 }
 
 function renderViewMode(mode = getViewMode()) {
@@ -88,6 +93,68 @@ function formatExportParams(params) {
   if (!params) return "";
   const decimation = Number(params.decimation).toLocaleString();
   return `${decimation} vertices - ${params.textureSize}px texture`;
+}
+
+function engineDependencyProblems(status) {
+  const dependencies = status.engine?.dependencies || {};
+  const missing = Object.entries(dependencies)
+    .filter(([key, value]) => !key.endsWith("Error") && value === false)
+    .map(([key]) => key);
+  const errors = Object.entries(dependencies)
+    .filter(([key, value]) => key.endsWith("Error") && value)
+    .map(([key, value]) => `${key.replace(/Error$/, "")}: ${value}`);
+
+  return { missing, errors };
+}
+
+function engineStatusLabel(status) {
+  if (!status.pixal3dRepo.exists) {
+    return { text: "Pixal3D repo missing", className: "warn" };
+  }
+  if (!status.engine.pythonOk) {
+    return { text: "Python env missing", className: "warn" };
+  }
+  if (!status.engine.runnerExists) {
+    return { text: "Runner missing", className: "warn" };
+  }
+  if (status.engine.ready) {
+    return { text: "Ready", className: "ok" };
+  }
+
+  const { missing, errors } = engineDependencyProblems(status);
+  if (errors.length) {
+    return { text: `${errors[0].split(":")[0]} failed`, className: "warn" };
+  }
+  if (missing.length) {
+    return { text: `${missing.join(", ")} missing`, className: "warn" };
+  }
+  return { text: "Setup incomplete", className: "warn" };
+}
+
+function engineSetupNotes(status) {
+  const notes = [];
+  if (!status.pixal3dRepo.exists) {
+    notes.push("Run START_PIXAL3D.bat to download vendor/Pixal3D.");
+  }
+  if (!status.engine.pythonOk) {
+    notes.push("Run START_PIXAL3D.bat to create the Python environment.");
+  }
+  if (!status.engine.runnerExists) {
+    notes.push("The local Pixal3D runner is missing from app/pixal3d_runner.py.");
+  }
+
+  const { missing, errors } = engineDependencyProblems(status);
+  if (missing.length) {
+    notes.push(`Missing engine dependencies: ${missing.join(", ")}.`);
+  }
+  if (errors.length) {
+    notes.push(`Engine import check failed: ${errors[0]}.`);
+  }
+  if (!status.engine.ready) {
+    notes.push("For full generation, run START_PIXAL3D.bat -Mode Full or scripts/setup-wsl-backend.ps1, then restart the UI.");
+  }
+
+  return notes;
 }
 
 function isJobBusy(job) {
@@ -137,9 +204,9 @@ async function refreshStatus() {
       setText("model-status", `${status.model.present}/${status.model.total} files`, "warn");
     }
 
-    const repoOk = status.pixal3dRepo.exists;
-    const engineOk = status.engine.ready;
-    setText("engine-status", repoOk && engineOk ? "CUDA deps ready" : "CUDA deps missing", repoOk && engineOk ? "ok" : "warn");
+    engineReady = Boolean(status.engine.ready);
+    const engineLabel = engineStatusLabel(status);
+    setText("engine-status", engineLabel.text, engineLabel.className);
 
     const notes = [];
     if (!status.wsl.available && status.wsl.needed) {
@@ -148,14 +215,15 @@ async function refreshStatus() {
     if (!status.model.ready) {
       notes.push("Run scripts/download-models.ps1 to fetch Pixal3D weights before the first real generation.");
     }
-    if (!engineOk) {
-      notes.push("Run scripts/setup-wsl-backend.ps1 and then scripts/launch-wsl.ps1 for real generation.");
-    }
+    notes.push(...engineSetupNotes(status));
     if (!status.nodeModules.three) {
       notes.push("Run npm install so the local Three.js viewer can load without CDN.");
     }
     setupNote.textContent = notes.join(" ");
+    syncGenerateButtonState();
   } catch (error) {
+    engineReady = false;
+    syncGenerateButtonState();
     setupNote.textContent = `Status check failed: ${error.message}`;
   }
 }
