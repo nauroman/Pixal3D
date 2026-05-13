@@ -434,6 +434,9 @@ def main() -> int:
     print("[Inference] Estimating camera parameters")
     camera_params = get_camera_params_wild_moge(tmp_path, moge_model, device="cuda")
     tmp_path.unlink(missing_ok=True)
+    del moge_model
+    torch.cuda.empty_cache()
+    print("[MoGe-2] Released camera estimation model")
     print(f"[Inference] camera_angle_x={camera_params['camera_angle_x']:.4f}, distance={camera_params['distance']:.4f}")
 
     torch.manual_seed(args.seed)

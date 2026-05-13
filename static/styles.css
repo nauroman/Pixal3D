@@ -255,6 +255,14 @@ summary {
   line-height: 1.4;
 }
 
+.profile-note {
+  min-height: 17px;
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .primary-button,
 .secondary-button {
   min-height: 44px;

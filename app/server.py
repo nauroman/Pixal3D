@@ -269,6 +269,19 @@ def _validate_texture_size(texture_size: int) -> int:
     return texture_size
 
 
+def _validate_generation_profile(resolution: int, ss_steps: int, shape_steps: int, tex_steps: int) -> None:
+    if resolution != 1536:
+        return
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "1536 textured generation is disabled on this local WSL/CUDA profile because it resets CUDA during texture conditioning. "
+            "Use 1024, then re-export Decimation/Texture from the completed model."
+        ),
+    )
+
+
 def _is_transformers_import_failure(log_text: str) -> bool:
     lower = log_text.lower()
     return (
@@ -297,7 +310,7 @@ def _diagnose_failure(job: dict[str, Any], log_lines: list[str] | None = None) -
             "The automatic retry also failed; restart the WSL backend or reinstall the Pixal3D Python env if it repeats."
         )
     if "cuda driver error: device not ready" in lower:
-        return "CUDA driver became unavailable during generation. Try 1024 resolution or fewer sampling steps, then re-export Decimation/Texture from the completed model."
+        return "CUDA driver became unavailable during generation. Use 1024 resolution, then re-export Decimation/Texture from the completed model."
     if "cuda out of memory" in lower or "outofmemoryerror" in lower:
         return "CUDA ran out of memory. Try lower resolution, fewer sampling steps, lower max tokens, or Low VRAM mode."
     if "cuda is not available" in lower:
@@ -584,6 +597,7 @@ async def create_job(
         raise HTTPException(status_code=400, detail="resolution must be 1024 or 1536")
     if attentionBackend not in ("flash_attn", "flash_attn_3", "xformers"):
         raise HTTPException(status_code=400, detail="unsupported attention backend")
+    _validate_generation_profile(resolution, ssSteps, shapeSteps, texSteps)
     decimation = _normalize_decimation(decimation)
     textureSize = _validate_texture_size(textureSize)
 

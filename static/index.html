@@ -57,7 +57,7 @@
               Resolution
               <select id="resolution" name="resolution">
                 <option value="1024" selected>1024</option>
-                <option value="1536">1536</option>
+                <option value="1536" disabled>1536 unavailable</option>
               </select>
             </label>
           </div>
@@ -74,6 +74,7 @@
             <label for="texSteps">Texture steps <output id="texStepsValue">12</output></label>
             <input id="texSteps" name="texSteps" type="range" min="4" max="30" value="12" step="1" />
           </div>
+          <p id="profile-note" class="profile-note"></p>
 
           <details>
             <summary>Export and backend</summary>

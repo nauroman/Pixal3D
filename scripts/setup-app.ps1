@@ -7,12 +7,15 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 function Get-PythonForApp {
-    $candidate = (& py -V:3.12 -c "import sys; print(sys.executable)" 2>$null)
-    if (-not $candidate) {
+    $candidate = $null
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $candidate = (& py -3.12 -c "import sys; print(sys.executable)" 2>$null)
+    }
+    if (-not $candidate -and (Get-Command python -ErrorAction SilentlyContinue)) {
         $candidate = (& python -c "import sys; print(sys.executable)" 2>$null)
     }
     if (-not $candidate) {
-        throw "Python was not found. Install Python or adjust this script."
+        throw "Python was not found. Install Python 3.12, then run START_PIXAL3D.bat again."
     }
     return $candidate.Trim()
 }

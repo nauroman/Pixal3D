@@ -13,6 +13,7 @@ const jobIdElement = document.getElementById("job-id");
 const setupNote = document.getElementById("setup-note");
 const viewModeButton = document.getElementById("view-mode");
 const exportStatus = document.getElementById("export-status");
+const profileNote = document.getElementById("profile-note");
 
 let activeJobId = null;
 let pollTimer = null;
@@ -20,6 +21,7 @@ let loadedResultUrl = null;
 let lastJob = null;
 
 const exportControlIds = ["decimation", "textureSize"];
+const stepControlIds = ["ssSteps", "shapeSteps", "texSteps"];
 
 function setText(id, text, className = "") {
   const element = document.getElementById(id);
@@ -33,10 +35,27 @@ function updateRangeValue(id) {
   output.textContent = input.value;
   input.addEventListener("input", () => {
     output.textContent = input.value;
+    syncGenerateButtonState();
   });
 }
 
-["ssSteps", "shapeSteps", "texSteps"].forEach(updateRangeValue);
+stepControlIds.forEach(updateRangeValue);
+
+function generationProfileWarning() {
+  const resolution = Number(document.getElementById("resolution").value);
+  if (resolution !== 1536) {
+    return "";
+  }
+
+  return "1536 is unstable on this CUDA setup. Use 1024, then re-export Decimation/Texture.";
+}
+
+function syncGenerateButtonState() {
+  const warning = generationProfileWarning();
+  profileNote.textContent = warning;
+  profileNote.classList.toggle("warn", Boolean(warning));
+  generateButton.disabled = !imageInput.files.length || Boolean(warning) || Boolean(lastJob && isJobBusy(lastJob));
+}
 
 function renderViewMode(mode = getViewMode()) {
   viewModeButton.textContent = `Mode: ${mode.label}`;
@@ -93,7 +112,7 @@ async function handleJobUpdate(job) {
   lastJob = job;
   renderJob(job);
   setExportControlsDisabled(isJobBusy(job));
-  generateButton.disabled = isJobBusy(job);
+  syncGenerateButtonState();
   if (job.exportStatus === "exporting") {
     setDownloadUrl(job.resultUrl || loadedResultUrl, false);
   } else {
@@ -146,7 +165,7 @@ function setImageFile(file) {
   const url = URL.createObjectURL(file);
   imagePreview.src = url;
   dropZone.classList.add("has-image");
-  generateButton.disabled = false;
+  syncGenerateButtonState();
 }
 
 imageInput.addEventListener("change", () => {
@@ -173,6 +192,7 @@ dropZone.addEventListener("drop", (event) => {
 
 document.getElementById("refresh-status").addEventListener("click", refreshStatus);
 document.getElementById("reset-view").addEventListener("click", resetView);
+document.getElementById("resolution").addEventListener("change", syncGenerateButtonState);
 viewModeButton.addEventListener("click", () => renderViewMode(cycleViewMode()));
 
 function formDataForJob() {
@@ -196,6 +216,10 @@ function formDataForJob() {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!imageInput.files.length) return;
+  if (generationProfileWarning()) {
+    syncGenerateButtonState();
+    return;
+  }
 
   lastJob = null;
   loadedResultUrl = null;
@@ -220,7 +244,7 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     jobTitle.textContent = "Job failed to start";
     jobStage.textContent = error.message;
-    generateButton.disabled = false;
+    syncGenerateButtonState();
     setExportControlsDisabled(false);
   }
 });
@@ -362,4 +386,5 @@ exportControlIds.forEach((id) => {
 });
 
 renderViewMode();
+syncGenerateButtonState();
 refreshStatus();
