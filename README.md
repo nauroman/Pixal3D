@@ -6,9 +6,10 @@ A local Windows wrapper for TencentARC Pixal3D. It provides an HTML page for ima
 
 ![Pixal3D Local UI screenshot 1](screenshots/screenshot.jpg)
 
-![Pixal3D Local UI screenshot 2](screenshots/screenshot%202.jpg)
-
-![Pixal3D Local UI screenshot 3](screenshots/screenshot%203.jpg)
+<p align="left">
+  <img src="screenshots/screenshot%202.jpg" alt="Pixal3D Local UI screenshot 2" width="360">
+  <img src="screenshots/screenshot%203.jpg" alt="Pixal3D Local UI screenshot 3" width="360">
+</p>
 
 ## Quick Start
 

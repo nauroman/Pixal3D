@@ -152,7 +152,7 @@ function applyViewMode() {
   });
 }
 
-export async function loadModel(url) {
+export async function loadModel(url, { resetViewOnLoad = true } = {}) {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(url);
 
@@ -176,8 +176,11 @@ export async function loadModel(url) {
   const distance = largest * 2.2;
   camera.near = Math.max(0.001, largest / 1000);
   camera.far = Math.max(1000, largest * 20);
-  camera.position.set(distance, distance * 0.72, distance);
-  controls.target.set(0, 0, 0);
+  camera.updateProjectionMatrix();
+  if (resetViewOnLoad) {
+    camera.position.set(distance, distance * 0.72, distance);
+    controls.target.set(0, 0, 0);
+  }
   controls.update();
   viewerElement.classList.add("has-model");
 }

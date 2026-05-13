@@ -20,6 +20,7 @@ const advancedSettings = document.getElementById("advanced-settings");
 let activeJobId = null;
 let pollTimer = null;
 let loadedResultUrl = null;
+let loadedResultJobId = null;
 let lastJob = null;
 let engineReady = false;
 
@@ -356,8 +357,10 @@ async function loadResultIfReady(job) {
     return;
   }
 
-  await loadModel(job.resultUrl);
+  const shouldResetView = job.id !== loadedResultJobId;
+  await loadModel(job.resultUrl, { resetViewOnLoad: shouldResetView });
   loadedResultUrl = job.resultUrl;
+  loadedResultJobId = job.id;
   setDownloadUrl(job.resultUrl, job.exportStatus !== "failed");
 }
 
@@ -487,6 +490,7 @@ form.addEventListener("submit", async (event) => {
 
   lastJob = null;
   loadedResultUrl = null;
+  loadedResultJobId = null;
   generateButton.disabled = true;
   setExportControlsDisabled(true);
   setDownloadUrl(null);
