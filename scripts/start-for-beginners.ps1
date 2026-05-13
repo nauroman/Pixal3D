@@ -1,4 +1,4 @@
-﻿param(
+param(
     [ValidateSet("Auto", "Full", "Quick")]
     [string]$Mode = "Auto",
     [switch]$NoUpdate,
@@ -30,11 +30,11 @@ function Write-WarningText {
     param([string]$Text)
 
     Write-Host ""
-    Write-Host "[Внимание] $Text" -ForegroundColor Yellow
+    Write-Host "[Warning] $Text" -ForegroundColor Yellow
 }
 
 function Wait-ForUser {
-    param([string]$Prompt = "Нажмите Enter, чтобы продолжить")
+    param([string]$Prompt = "Press Enter to continue")
 
     [void](Read-Host $Prompt)
 }
@@ -42,14 +42,14 @@ function Wait-ForUser {
 function Show-Help {
     Write-Host "Pixal3D beginner launcher"
     Write-Host ""
-    Write-Host "Обычный запуск для новичка:"
-    Write-Host "  Дважды нажмите START_PIXAL3D.bat"
+    Write-Host "Normal beginner launch:"
+    Write-Host "  Double-click START_PIXAL3D.bat"
     Write-Host ""
-    Write-Host "Дополнительные режимы:"
-    Write-Host "  START_PIXAL3D.bat -Mode Full     Полная настройка WSL/CUDA backend и запуск"
-    Write-Host "  START_PIXAL3D.bat -Mode Quick    Только Windows UI, без настройки WSL backend"
-    Write-Host "  START_PIXAL3D.bat -NoUpdate      Не делать безопасный git pull --ff-only"
-    Write-Host "  START_PIXAL3D.bat -NoBrowser     Запустить сервер, но не открывать браузер"
+    Write-Host "Optional modes:"
+    Write-Host "  START_PIXAL3D.bat -Mode Full     Full WSL/CUDA backend setup and launch"
+    Write-Host "  START_PIXAL3D.bat -Mode Quick    Windows web UI only, without WSL backend setup"
+    Write-Host "  START_PIXAL3D.bat -NoUpdate      Skip the safe git pull --ff-only step"
+    Write-Host "  START_PIXAL3D.bat -NoBrowser     Start the server without opening a browser"
 }
 
 function Ask-YesNo {
@@ -64,31 +64,31 @@ function Ask-YesNo {
         if (-not $answer) {
             return $DefaultYes
         }
-        if ($answer -in @("y", "yes", "д", "да")) {
+        if ($answer -in @("y", "yes")) {
             return $true
         }
-        if ($answer -in @("n", "no", "н", "нет")) {
+        if ($answer -in @("n", "no")) {
             return $false
         }
-        Write-Host "Введите Y/да или N/нет."
+        Write-Host "Type Y/yes or N/no."
     }
 }
 
 function Select-LaunchMode {
     Write-Header "Pixal3D local launcher"
-    Write-Host "Этот файл подготовит проект и откроет локальную HTML-страницу в браузере."
+    Write-Host "This launcher prepares the project and opens the local HTML page in your browser."
     Write-Host ""
-    Write-Host "Pixal3D состоит из двух частей:"
-    Write-Host "  1. Windows UI: веб-страница, загрузка картинки, просмотр GLB."
-    Write-Host "  2. WSL/CUDA backend: тяжелая генерация 3D-модели через NVIDIA GPU."
+    Write-Host "Pixal3D has two parts:"
+    Write-Host "  1. Windows UI: the web page for image upload, settings, and GLB preview."
+    Write-Host "  2. WSL/CUDA backend: the heavy 3D generation engine that requires an NVIDIA GPU."
     Write-Host ""
-    Write-Host "Выберите режим:"
-    Write-Host "  1 - Полная настройка и запуск с 3D-генерацией. Долго, нужны WSL и NVIDIA GPU. Рекомендуется для первого полноценного запуска."
-    Write-Host "  2 - Быстрый запуск только интерфейса. Подходит, чтобы проверить страницу; генерация не заработает без backend."
-    Write-Host "  3 - Выход."
+    Write-Host "Choose a mode:"
+    Write-Host "  1 - Full setup and launch with 3D generation. This can take a long time and requires WSL plus an NVIDIA GPU."
+    Write-Host "  2 - Quick launch of the web UI only. This is useful for checking the page, but generation will not work without the backend."
+    Write-Host "  3 - Exit."
 
     while ($true) {
-        $answer = (Read-Host "Введите 1, 2 или 3 и нажмите Enter [1]").Trim()
+        $answer = (Read-Host "Type 1, 2, or 3, then press Enter [1]").Trim()
         if (-not $answer) {
             return "Full"
         }
@@ -96,7 +96,7 @@ function Select-LaunchMode {
             "1" { return "Full" }
             "2" { return "Quick" }
             "3" { exit 0 }
-            default { Write-Host "Нужно ввести 1, 2 или 3." }
+            default { Write-Host "Please type 1, 2, or 3." }
         }
     }
 }
@@ -113,7 +113,7 @@ function Invoke-External {
     & $FilePath @Arguments
     $exitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
     if ($exitCode -ne 0 -and -not $AllowFailure) {
-        throw "Команда завершилась с ошибкой $exitCode`: $FilePath $($Arguments -join ' ')"
+        throw "Command failed with exit code $exitCode`: $FilePath $($Arguments -join ' ')"
     }
     return $exitCode
 }
@@ -132,14 +132,14 @@ function Install-WingetPackage {
     )
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-WarningText "На этом Windows не найдена команда winget. Автоматически поставить $DisplayName не получится."
-        Write-Host "Открою страницу установки. Установите $DisplayName, закройте это окно и запустите START_PIXAL3D.bat снова."
+        Write-WarningText "The winget command was not found. The launcher cannot install $DisplayName automatically on this Windows installation."
+        Write-Host "I will open the manual download page. Install $DisplayName, close this window, then run START_PIXAL3D.bat again."
         Start-Process $ManualUrl
         Wait-ForUser
         exit 2
     }
 
-    Write-Step "Устанавливаю $DisplayName через winget. Если Windows покажет окно разрешения администратора, нажмите Yes/Да."
+    Write-Step "Installing $DisplayName through winget. If Windows asks for administrator permission, click Yes."
     Invoke-External -FilePath "winget" -Arguments @(
         "install",
         "--id",
@@ -175,19 +175,19 @@ function Test-PythonReady {
 
 function Ensure-Python {
     if (Test-PythonReady) {
-        Write-Host "Python найден."
+        Write-Host "Python was found."
         return
     }
 
-    Write-WarningText "Python не найден. Он нужен для локального сервера Pixal3D."
+    Write-WarningText "Python was not found. Python is required for the local Pixal3D server."
     Install-WingetPackage `
         -DisplayName "Python 3.12" `
         -Id "Python.Python.3.12" `
         -ManualUrl "https://www.python.org/downloads/windows/"
 
     if (-not (Test-PythonReady)) {
-        Write-WarningText "Python установлен, но это окно еще не видит новую команду python."
-        Write-Host "Это обычная ситуация после установки. Закройте это окно и запустите START_PIXAL3D.bat снова."
+        Write-WarningText "Python was installed, but this terminal window still cannot see the new python command."
+        Write-Host "This is normal after some Windows installs. Close this window and run START_PIXAL3D.bat again."
         Wait-ForUser
         exit 2
     }
@@ -203,78 +203,78 @@ function Ensure-CommandPackage {
     )
 
     if (Get-Command $Command -ErrorAction SilentlyContinue) {
-        Write-Host "$DisplayName найден."
+        Write-Host "$DisplayName was found."
         return
     }
 
-    Write-WarningText "$DisplayName не найден. $Why"
+    Write-WarningText "$DisplayName was not found. $Why"
     Install-WingetPackage -DisplayName $DisplayName -Id $WingetId -ManualUrl $ManualUrl
 
     if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
-        Write-WarningText "$DisplayName установлен, но это окно еще не видит команду $Command."
-        Write-Host "Закройте это окно и запустите START_PIXAL3D.bat снова."
+        Write-WarningText "$DisplayName was installed, but this terminal window still cannot see the $Command command."
+        Write-Host "Close this window and run START_PIXAL3D.bat again."
         Wait-ForUser
         exit 2
     }
 }
 
 function Ensure-BasicTools {
-    Write-Step "Проверяю базовые программы: Git, Python и Node.js."
+    Write-Step "Checking basic tools: Git, Python, and Node.js."
     Ensure-CommandPackage `
         -Command "git" `
         -DisplayName "Git" `
         -WingetId "Git.Git" `
         -ManualUrl "https://git-scm.com/download/win" `
-        -Why "Git нужен, чтобы скачать официальные исходники Pixal3D и TRELLIS.2 в папку vendor."
+        -Why "Git is required to download the official Pixal3D and TRELLIS.2 source repositories into the vendor folder."
     Ensure-Python
     Ensure-CommandPackage `
         -Command "npm" `
         -DisplayName "Node.js LTS" `
         -WingetId "OpenJS.NodeJS.LTS" `
         -ManualUrl "https://nodejs.org/" `
-        -Why "Node.js нужен, чтобы поставить Three.js для просмотра GLB в браузере."
+        -Why "Node.js is required to install Three.js for GLB preview in the browser."
 }
 
 function Update-RepositoryIfSafe {
     if ($NoUpdate) {
-        Write-Host "Обновление репозитория пропущено: указан -NoUpdate."
+        Write-Host "Repository update skipped because -NoUpdate was passed."
         return
     }
     if (-not (Test-Path (Join-Path $Root ".git"))) {
-        Write-Host "Папка не выглядит как git-репозиторий. Пропускаю git pull."
+        Write-Host "This folder does not look like a Git repository. Skipping git pull."
         return
     }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        Write-Host "Git не найден, обновление репозитория пропущено."
+        Write-Host "Git was not found. Skipping repository update."
         return
     }
 
-    Write-Step "Проверяю, можно ли безопасно обновить проект."
+    Write-Step "Checking whether the project can be safely updated."
     $status = & git status --porcelain
     if ($LASTEXITCODE -ne 0) {
-        Write-WarningText "Не удалось прочитать git status. Продолжаю без обновления."
+        Write-WarningText "Could not read git status. Continuing without an update."
         return
     }
     if ($status) {
-        Write-WarningText "В папке есть локальные изменения. Чтобы ничего не перезаписать, git pull пропущен."
+        Write-WarningText "This folder has local changes. To avoid overwriting work, git pull was skipped."
         return
     }
 
     $branch = (& git rev-parse --abbrev-ref HEAD 2>$null)
     if ($LASTEXITCODE -ne 0 -or $branch -eq "HEAD") {
-        Write-Host "Git remote/branch не настроен для обычного pull. Пропускаю обновление."
+        Write-Host "Git remote/branch is not configured for a normal pull. Skipping repository update."
         return
     }
 
     $code = Invoke-External -FilePath "git" -Arguments @("pull", "--ff-only") -AllowFailure
     if ($code -ne 0) {
-        Write-WarningText "Автообновление не получилось. Это не мешает запуску, продолжаю с текущими файлами."
+        Write-WarningText "Automatic update failed. This does not block launch, so the current files will be used."
     }
 }
 
 function Setup-WindowsUi {
-    Write-Step "Ставлю зависимости Windows UI и скачиваю vendor/Pixal3D + vendor/TRELLIS.2, если их нет."
-    Write-Host "Это создаст .venv, поставит Python packages из requirements-app.txt и выполнит npm install."
+    Write-Step "Installing Windows UI dependencies and downloading vendor/Pixal3D plus vendor/TRELLIS.2 if missing."
+    Write-Host "This creates .venv, installs Python packages from requirements-app.txt, and runs npm install."
     & (Join-Path $Root "scripts\setup-app.ps1")
 }
 
@@ -288,24 +288,24 @@ function Test-WslInstalled {
 
 function Ensure-WslInstalled {
     if (Test-WslInstalled) {
-        Write-Host "WSL найден."
+        Write-Host "WSL was found."
         return
     }
 
-    Write-WarningText "WSL не установлен. WSL нужен, потому что официальный Pixal3D backend использует Linux CUDA-библиотеки."
-    Write-Host "Сейчас откроется PowerShell от администратора и выполнит: wsl --install"
-    Write-Host "Что делать новичку:"
-    Write-Host "  1. Если Windows спросит разрешение администратора, нажмите Yes/Да."
-    Write-Host "  2. Дождитесь завершения установки."
-    Write-Host "  3. Если Windows попросит перезагрузку, перезагрузите компьютер."
-    Write-Host "  4. После перезагрузки снова запустите START_PIXAL3D.bat."
+    Write-WarningText "WSL is not installed. WSL is required because the official Pixal3D backend uses Linux CUDA libraries."
+    Write-Host "An administrator PowerShell window will open and run: wsl --install"
+    Write-Host "Beginner instructions:"
+    Write-Host "  1. If Windows asks for administrator permission, click Yes."
+    Write-Host "  2. Wait for WSL installation to finish."
+    Write-Host "  3. If Windows asks for a reboot, reboot the computer."
+    Write-Host "  4. After rebooting, run START_PIXAL3D.bat again."
 
-    if (-not (Ask-YesNo "Открыть установку WSL сейчас?" $true)) {
-        throw "Без WSL полный backend Pixal3D на Windows не запустится."
+    if (-not (Ask-YesNo "Open the WSL installer now?" $true)) {
+        throw "The full Pixal3D backend cannot run on Windows without WSL."
     }
 
     & (Join-Path $Root "scripts\install-wsl.ps1")
-    Wait-ForUser "После завершения установки WSL/перезагрузки нажмите Enter и запустите START_PIXAL3D.bat снова"
+    Wait-ForUser "After WSL installation and any required reboot, press Enter and run START_PIXAL3D.bat again"
     exit 10
 }
 
@@ -389,33 +389,33 @@ function Setup-WslBackend {
     Ensure-WslInstalled
 
     if (-not (Test-NvidiaGpuVisible)) {
-        Write-WarningText "Windows не видит NVIDIA GPU через nvidia-smi."
-        Write-Host "Полная генерация Pixal3D требует NVIDIA GPU, свежий NVIDIA Driver и CUDA внутри WSL."
-        Write-Host "Если на компьютере нет NVIDIA GPU, интерфейс можно открыть, но генерация 3D не заработает."
-        if (-not (Ask-YesNo "Все равно продолжить тяжелую настройку WSL backend?" $false)) {
+        Write-WarningText "Windows cannot see an NVIDIA GPU through nvidia-smi."
+        Write-Host "Full Pixal3D generation requires an NVIDIA GPU, a recent NVIDIA Driver, and CUDA support inside WSL."
+        Write-Host "If this computer has no NVIDIA GPU, the UI can still open, but 3D generation will not work."
+        if (-not (Ask-YesNo "Continue the heavy WSL backend setup anyway?" $false)) {
             return $false
         }
     }
 
     if (Test-WslBackendReady) {
-        Write-Host "WSL/CUDA backend уже готов."
+        Write-Host "WSL/CUDA backend is already ready."
         return $true
     }
 
-    Write-Step "Настраиваю WSL/CUDA backend Pixal3D."
-    Write-Host "Это может занять 30-90+ минут: будут ставиться Linux packages, Miniforge, PyTorch CUDA, Pixal3D/TRELLIS зависимости и модели."
-    Write-Host "Если WSL запускается впервые и спрашивает имя пользователя:"
-    Write-Host "  - введите простое имя латиницей, например pixal;"
-    Write-Host "  - затем придумайте пароль Ubuntu;"
-    Write-Host "  - при вводе пароля символы не показываются, это нормально;"
-    Write-Host "  - повторите тот же пароль второй раз."
-    Write-Host "Если появится запрос [sudo] password, введите этот Ubuntu-пароль."
+    Write-Step "Preparing the Pixal3D WSL/CUDA backend."
+    Write-Host "This can take 30-90+ minutes. The script installs Linux packages, Miniforge, PyTorch CUDA, Pixal3D/TRELLIS dependencies, and model files."
+    Write-Host "If WSL starts for the first time and asks for a user name:"
+    Write-Host "  - type a simple lowercase name, for example pixal;"
+    Write-Host "  - create an Ubuntu password;"
+    Write-Host "  - password characters are invisible while you type; this is normal;"
+    Write-Host "  - type the same password again to confirm it."
+    Write-Host "If you see a [sudo] password prompt, type the same Ubuntu password."
 
     & (Join-Path $Root "scripts\setup-wsl-backend.ps1")
 
     if (-not (Test-WslBackendReady)) {
-        Write-WarningText "Setup завершился, но проверка backend еще не прошла."
-        Write-Host "Можно открыть UI сейчас, а детали ошибки посмотреть в engine/server.err.log или в тексте выше."
+        Write-WarningText "Setup finished, but the backend readiness check still failed."
+        Write-Host "The UI can still be opened now. For backend details, check engine/server.err.log or the error text printed above."
         return $false
     }
 
@@ -425,7 +425,7 @@ function Setup-WslBackend {
 function Start-Pixal3D {
     param([string]$Backend)
 
-    Write-Step "Запускаю Pixal3D и открываю HTML-страницу."
+    Write-Step "Starting Pixal3D and opening the local HTML page."
     $arguments = @("-Backend", $Backend)
     if ($NoBrowser) {
         $arguments += "-NoBrowser"
@@ -454,23 +454,23 @@ try {
         if ($backendReady) {
             Start-Pixal3D -Backend "Wsl"
         } else {
-            Write-WarningText "Полный backend не готов. Открываю Windows UI, чтобы можно было проверить страницу."
+            Write-WarningText "The full backend is not ready. Opening the Windows UI so the page can still be checked."
             Start-Pixal3D -Backend "Windows"
         }
     }
 
     Write-Host ""
-    Write-Host "Готово. Если браузер открылся, используйте страницу Pixal3D там." -ForegroundColor Green
-    Write-Host "Если нужно перезапустить сервер, просто запустите START_PIXAL3D.bat еще раз."
+    Write-Host "Done. If the browser opened, use the Pixal3D page there." -ForegroundColor Green
+    Write-Host "To restart the server later, run START_PIXAL3D.bat again."
     exit 0
 } catch {
     Write-Host ""
-    Write-Host "[Ошибка] $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[Error] $($_.Exception.Message)" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Что сделать новичку:"
-    Write-Host "  1. Прочитайте последнюю ошибку выше."
-    Write-Host "  2. Если только что ставились Git/Python/Node.js, закройте это окно и запустите START_PIXAL3D.bat снова."
-    Write-Host "  3. Если ошибка про WSL или Ubuntu, перезагрузите Windows и запустите START_PIXAL3D.bat снова."
-    Write-Host "  4. Если ошибка повторяется, отправьте текст ошибки и файлы engine/server.out.log / engine/server.err.log тому, кто помогает с проектом."
+    Write-Host "Beginner recovery steps:"
+    Write-Host "  1. Read the last error above."
+    Write-Host "  2. If Git, Python, or Node.js was just installed, close this window and run START_PIXAL3D.bat again."
+    Write-Host "  3. If the error mentions WSL or Ubuntu, reboot Windows and run START_PIXAL3D.bat again."
+    Write-Host "  4. If the error repeats, send the error text plus engine/server.out.log and engine/server.err.log to the person helping with this project."
     exit 1
 }

@@ -87,7 +87,7 @@ function setExportStatus(text, className = "") {
 function formatExportParams(params) {
   if (!params) return "";
   const decimation = Number(params.decimation).toLocaleString();
-  return `${decimation} vertices · ${params.textureSize}px texture`;
+  return `${decimation} vertices - ${params.textureSize}px texture`;
 }
 
 function isJobBusy(job) {
@@ -354,7 +354,7 @@ function completeStageText(job) {
   if (!duration) {
     return job.stage || "Complete";
   }
-  return `${job.stage || "Complete"} · ${duration}`;
+  return `${job.stage || "Complete"} - ${duration}`;
 }
 
 function renderJob(job) {

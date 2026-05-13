@@ -1,161 +1,161 @@
 # Pixal3D Local UI
 
-Локальная Windows-обертка для TencentARC Pixal3D: HTML-страница для загрузки изображения, настройки генерации, просмотра результата в Three.js и скачивания готового `.glb`.
+A local Windows wrapper for TencentARC Pixal3D. It provides an HTML page for image upload, generation settings, Three.js GLB preview, and downloading the generated textured `.glb` model.
 
-## Самый простой запуск
+## Quick Start
 
-1. Скачайте или склонируйте репозиторий.
-2. Если это ZIP-архив, распакуйте его полностью. Не запускайте проект прямо из архива.
-3. Откройте папку проекта в Проводнике Windows.
-4. Дважды нажмите:
+1. Download or clone this repository.
+2. If you downloaded a ZIP archive, extract the whole archive first. Do not run the project from inside the ZIP file.
+3. Open the project folder in Windows File Explorer.
+4. Double-click:
 
 ```bat
 START_PIXAL3D.bat
 ```
 
-BAT-файл сам запустит PowerShell-helper, проверит зависимости, поставит недостающие программы, подготовит проект, запустит локальный сервер и откроет HTML-страницу в браузере.
+The BAT file starts a PowerShell helper that checks dependencies, installs missing tools when possible, prepares the project, starts the local server, and opens the HTML page in your browser.
 
-## Какой режим выбрать
+## Which Mode To Choose
 
-При запуске `START_PIXAL3D.bat` появится меню:
+When `START_PIXAL3D.bat` starts, it shows this menu:
 
 ```text
-1 - Полная настройка и запуск с 3D-генерацией
-2 - Быстрый запуск только интерфейса
-3 - Выход
+1 - Full setup and launch with 3D generation
+2 - Quick launch of the web UI only
+3 - Exit
 ```
 
-Выбирайте `1`, если хотите полноценную генерацию 3D-моделей. Это долгий первый запуск: нужны WSL, NVIDIA GPU, CUDA backend и большие model files.
+Choose `1` if you want real Pixal3D model generation. The first full setup can take a long time because it needs WSL, an NVIDIA GPU, a CUDA backend, and large model files.
 
-Выбирайте `2`, если хотите быстро открыть локальную страницу и проверить интерфейс. В этом режиме веб-страница откроется, но генерация 3D не заработает, пока не настроен WSL/CUDA backend.
+Choose `2` if you only want to open the local page quickly and check the interface. The page will open, but 3D generation will not work until the WSL/CUDA backend is ready.
 
-## Что устанавливается автоматически
+## What The Launcher Installs
 
-`START_PIXAL3D.bat` проверяет и при необходимости ставит:
+`START_PIXAL3D.bat` checks and installs these items when needed:
 
-- Git - нужен для скачивания официальных исходников Pixal3D и TRELLIS.2 в `vendor/`.
-- Python 3.12 - нужен для локального FastAPI-сервера.
-- Node.js LTS / npm - нужен для установки Three.js viewer.
+- Git, used to download the official Pixal3D and TRELLIS.2 sources into `vendor/`.
+- Python 3.12, used by the local FastAPI server.
+- Node.js LTS / npm, used to install the Three.js viewer dependency.
 - Python virtual environment `.venv`.
-- Python-зависимости из `requirements-app.txt`.
-- npm-зависимости из `package.json`.
-- `vendor/Pixal3D` и `vendor/TRELLIS.2`.
+- Python dependencies from `requirements-app.txt`.
+- npm dependencies from `package.json`.
+- `vendor/Pixal3D` and `vendor/TRELLIS.2`.
 
-Если выбран полный режим, дополнительно настраивается:
+When full mode is selected, it also prepares:
 
 - WSL / Ubuntu.
-- Linux packages: build tools, git-lfs, ninja, libjpeg и другие.
+- Linux packages such as build tools, git-lfs, ninja, and libjpeg.
 - Miniforge.
 - Conda environment `pixal3d`.
-- PyTorch CUDA, Pixal3D/TRELLIS зависимости и CUDA extensions.
-- Локальные модели в `models/`.
+- PyTorch CUDA, Pixal3D/TRELLIS dependencies, and CUDA extensions.
+- Local model files in `models/`.
 
-Главный checkpoint Pixal3D занимает примерно 23 GB. Вместе с helper-моделями, Python/Conda окружением и WSL лучше иметь 80-100 GB свободного места.
+The main Pixal3D checkpoint is about 23 GB. With helper models, Python/Conda environments, and WSL files, keep about 80-100 GB of free disk space available.
 
-## Какие вопросы могут появиться
+## User Input During Setup
 
-Скрипт специально объясняет каждый ввод, но основные случаи такие:
+The launcher explains each step, but these are the common prompts a beginner may see:
 
-- Windows может спросить разрешение администратора. Это нужно для установки программ через `winget` или установки WSL. Нажмите `Yes` / `Да`.
-- Если WSL ставится впервые, Ubuntu попросит создать пользователя. Введите простое имя латиницей, например `pixal`.
-- Ubuntu попросит пароль. Придумайте пароль, введите его и повторите. Символы при вводе не показываются - это нормально.
-- Если позже появится `[sudo] password`, введите тот же Ubuntu-пароль.
-- Если Windows попросит перезагрузку после WSL, перезагрузите компьютер и снова запустите `START_PIXAL3D.bat`.
+- Windows may ask for administrator permission. This is needed when installing tools through `winget` or installing WSL. Click `Yes`.
+- If WSL/Ubuntu starts for the first time, it asks you to create a Linux user. Type a simple lowercase name, for example `pixal`, and press Enter.
+- Ubuntu then asks for a password. Create a password, press Enter, then type the same password again. The password characters are invisible while you type; that is normal.
+- If you later see `[sudo] password`, type the same Ubuntu password.
+- If Windows asks you to reboot after WSL installation, reboot the computer and run `START_PIXAL3D.bat` again.
 
-## Требования для полной 3D-генерации
+## Requirements For Full 3D Generation
 
-Для интерфейса достаточно Windows, Python и Node.js.
+The web interface only needs Windows, Python, and Node.js.
 
-Для реальной генерации Pixal3D нужны:
+Real Pixal3D generation needs:
 
-- Windows 10/11 с WSL.
-- NVIDIA GPU.
-- Свежий NVIDIA Driver, чтобы команда `nvidia-smi` работала в Windows.
-- Много свободного места на диске.
-- Стабильный интернет для скачивания моделей и зависимостей.
+- Windows 10/11 with WSL.
+- An NVIDIA GPU.
+- A recent NVIDIA Driver, with `nvidia-smi` working in Windows.
+- Enough free disk space.
+- A stable internet connection for downloading models and dependencies.
 
-Если NVIDIA GPU нет, можно открыть UI, но backend генерации завершится ошибкой: Pixal3D требует CUDA.
+If the computer does not have an NVIDIA GPU, the UI can still open, but generation will fail because Pixal3D requires CUDA.
 
-## Ручные команды
+## Manual Commands
 
-Обычный запуск через BAT:
+Normal beginner launch:
 
 ```bat
 START_PIXAL3D.bat
 ```
 
-Сразу полный режим:
+Start directly in full mode:
 
 ```bat
 START_PIXAL3D.bat -Mode Full
 ```
 
-Сразу быстрый режим:
+Start directly in quick UI-only mode:
 
 ```bat
 START_PIXAL3D.bat -Mode Quick
 ```
 
-Запустить без безопасного обновления репозитория:
+Start without the safe repository update step:
 
 ```bat
 START_PIXAL3D.bat -NoUpdate
 ```
 
-Запустить сервер, но не открывать браузер:
+Start the server without opening a browser:
 
 ```bat
 START_PIXAL3D.bat -NoBrowser
 ```
 
-Старый прямой PowerShell-запуск тоже работает:
+The older direct PowerShell launch still works:
 
 ```powershell
 .\launch.ps1
 ```
 
-## Что делает автообновление
+## Safe Auto-Update
 
-Если проект был скачан через Git и в папке нет локальных изменений, launcher выполняет:
+If the project was downloaded through Git and the folder has no local changes, the launcher runs:
 
 ```powershell
 git pull --ff-only
 ```
 
-Это безопасный режим обновления: он не перезаписывает ваши изменения. Если в папке уже есть измененные файлы, обновление пропускается и запуск продолжается.
+This is a safe update mode. It does not overwrite your local changes. If the folder contains modified files, the update step is skipped and the launch continues with the current files.
 
-## Структура проекта
+## Project Structure
 
-- `START_PIXAL3D.bat` - главный файл для новичка.
-- `scripts/start-for-beginners.ps1` - подробный helper, который ставит зависимости и объясняет действия.
-- `launch.ps1` - запуск локального сервера и открытие браузера.
-- `scripts/setup-app.ps1` - подготовка Windows UI.
-- `scripts/install-wsl.ps1` - установка WSL через elevated PowerShell.
-- `scripts/setup-wsl-backend.ps1` - подготовка WSL/CUDA backend.
-- `scripts/download-models.ps1` - отдельная загрузка моделей.
+- `START_PIXAL3D.bat` - the beginner-friendly entry point.
+- `scripts/start-for-beginners.ps1` - the detailed helper that installs dependencies and explains required actions.
+- `launch.ps1` - starts the local server and opens the browser.
+- `scripts/setup-app.ps1` - prepares the Windows web UI environment.
+- `scripts/install-wsl.ps1` - installs WSL through an elevated PowerShell window.
+- `scripts/setup-wsl-backend.ps1` - prepares the WSL/CUDA backend.
+- `scripts/download-models.ps1` - downloads model files separately.
 - `app/server.py` - FastAPI server.
-- `app/pixal3d_runner.py` - запуск Pixal3D inference/export.
-- `static/` - HTML/CSS/JS интерфейс.
-- `models/` - локальные модели после загрузки.
-- `outputs/` - результаты генерации.
-- `uploads/` - загруженные изображения.
-- `vendor/` - официальные исходники Pixal3D и TRELLIS.2.
+- `app/pixal3d_runner.py` - Pixal3D inference/export runner.
+- `static/` - HTML/CSS/JS interface.
+- `models/` - local model snapshots after download.
+- `outputs/` - generated results.
+- `uploads/` - uploaded input images.
+- `vendor/` - official Pixal3D and TRELLIS.2 sources.
 
-## Где смотреть ошибки
+## Where To Find Errors
 
-Если страница не открылась или backend упал, проверьте:
+If the page does not open or the backend fails, check:
 
 - `engine/server.out.log`
 - `engine/server.err.log`
 - `outputs/<job-id>/run.log`
 
-Если ошибка произошла во время WSL setup, основной текст ошибки обычно находится прямо в окне запуска.
+If the error happened during WSL setup, the most useful message is usually printed directly in the launcher window.
 
-## Optional RMBG-2.0 background remover
+## Optional RMBG-2.0 Background Remover
 
-По умолчанию используется публичная модель `ZhengPeng7/BiRefNet`. `briaai/RMBG-2.0` - gated Hugging Face model, для нее нужен доступ на Hugging Face.
+The default setup uses the public `ZhengPeng7/BiRefNet` model. `briaai/RMBG-2.0` is a gated Hugging Face model and requires access approval on Hugging Face.
 
-После получения доступа можно скачать RMBG-2.0 отдельно:
+After access is approved, download RMBG-2.0 manually:
 
 ```powershell
 .\.venv\Scripts\hf.exe auth login
@@ -163,4 +163,4 @@ git pull --ff-only
 .\.venv\Scripts\python.exe .\scripts\download_models.py --skip-existing
 ```
 
-Последняя команда обновит `models/Pixal3D/pipeline.json`, чтобы использовать `models/RMBG-2.0`, если эта папка существует.
+The last command updates `models/Pixal3D/pipeline.json` to use `models/RMBG-2.0` when that folder exists.
