@@ -160,7 +160,7 @@ Important behavior:
 - Decimation values below `30000` are normalized upward to `30000`.
 - Texture size is validated against `1024`, `2048`, and `4096`.
 - Resolution is validated against `1024` and `1536`.
-- On this local WSL/CUDA profile, textured `1536` generation is disabled because it repeatedly resets CUDA during texture conditioning; use `1024` for generation and re-export decimation/texture variants from the completed model.
+- The web UI always submits `1024` generation resolution. On this local WSL/CUDA profile, textured `1536` generation is disabled because it repeatedly resets CUDA during texture conditioning; use `1024` for generation and re-export decimation/texture variants from the completed model.
 - Attention backend is validated against `flash_attn`, `flash_attn_3`, and `xformers`.
 
 The current dirty backend change adds `_diagnose_failure(job)` with special messages for:
@@ -213,7 +213,7 @@ Pixal3D generation requires CUDA. If `torch.cuda.is_available()` is false, the r
 
 - status panel for GPU, model files, and engine;
 - image drop/select input;
-- generation controls for seed, resolution, sparse/shape/texture steps;
+- generation controls for seed and sparse/shape/texture steps;
 - export/backend controls for decimation, texture size, attention backend, max tokens, and low VRAM;
 - Generate and Save GLB actions;
 - viewer toolbar with mode and reset controls;

@@ -27,6 +27,10 @@
 
         <section class="status-panel" aria-label="Installation status">
           <div class="status-row">
+            <span>UI server</span>
+            <strong id="server-status" class="ok">Loaded</strong>
+          </div>
+          <div class="status-row">
             <span>GPU</span>
             <strong id="gpu-status">Checking...</strong>
           </div>
@@ -48,19 +52,10 @@
             <span id="drop-copy">Drop image here or click to choose</span>
           </label>
 
-          <div class="control-grid">
-            <label>
-              Seed
-              <input id="seed" name="seed" type="number" value="42" min="0" step="1" />
-            </label>
-            <label>
-              Resolution
-              <select id="resolution" name="resolution">
-                <option value="1024" selected>1024</option>
-                <option value="1536" disabled>1536 unavailable</option>
-              </select>
-            </label>
-          </div>
+          <label>
+            Seed
+            <input id="seed" name="seed" type="number" value="42" min="0" step="1" />
+          </label>
 
           <div class="range-group">
             <label for="ssSteps">Sparse steps <output id="ssStepsValue">12</output></label>
@@ -74,9 +69,7 @@
             <label for="texSteps">Texture steps <output id="texStepsValue">12</output></label>
             <input id="texSteps" name="texSteps" type="range" min="4" max="30" value="12" step="1" />
           </div>
-          <p id="profile-note" class="profile-note"></p>
-
-          <details>
+          <details id="advanced-settings">
             <summary>Export and backend</summary>
             <div class="control-grid details-grid">
               <label>
@@ -150,6 +143,50 @@
       </section>
     </main>
 
-    <script type="module" src="/static/app.js"></script>
+    <script>
+      window.__pixal3dAppStarted = false;
+      window.__pixal3dStatusChecksPending = function () {
+        return ["gpu-status", "model-status", "engine-status"].some((id) => {
+          const element = document.getElementById(id);
+          return element && element.textContent === "Checking...";
+        });
+      };
+      window.__pixal3dShowStartupError = function (message) {
+        const ids = ["gpu-status", "model-status", "engine-status"];
+        const serverStatus = document.getElementById("server-status");
+        const setupNote = document.getElementById("setup-note");
+        if (serverStatus) {
+          serverStatus.textContent = "UI script failed";
+          serverStatus.className = "bad";
+        }
+        ids.forEach((id) => {
+          const element = document.getElementById(id);
+          if (element) {
+            element.textContent = "Not checked";
+            element.className = "warn";
+          }
+        });
+        if (setupNote) {
+          setupNote.textContent = message;
+        }
+      };
+      window.addEventListener("error", (event) => {
+        if (!window.__pixal3dAppStarted || window.__pixal3dStatusChecksPending()) {
+          window.__pixal3dShowStartupError(`The page script failed before status checks could run: ${event.message}`);
+        }
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        if (!window.__pixal3dAppStarted || window.__pixal3dStatusChecksPending()) {
+          const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+          window.__pixal3dShowStartupError(`The page script failed before status checks could run: ${reason}`);
+        }
+      });
+      window.setTimeout(() => {
+        if (!window.__pixal3dAppStarted) {
+          window.__pixal3dShowStartupError("The page script did not start. Hard reload the page, or restart START_PIXAL3D.bat if this stays visible.");
+        }
+      }, 4000);
+    </script>
+    <script type="module" src="/static/app.js?v=20260513-status"></script>
   </body>
 </html>

@@ -1,4 +1,6 @@
-import { cycleViewMode, getViewMode, loadModel, resetView } from "/static/viewer.js";
+import { cycleViewMode, getViewMode, loadModel, resetView } from "/static/viewer.js?v=20260513-status";
+
+window.__pixal3dAppStarted = true;
 
 const form = document.getElementById("generate-form");
 const imageInput = document.getElementById("image-input");
@@ -13,7 +15,7 @@ const jobIdElement = document.getElementById("job-id");
 const setupNote = document.getElementById("setup-note");
 const viewModeButton = document.getElementById("view-mode");
 const exportStatus = document.getElementById("export-status");
-const profileNote = document.getElementById("profile-note");
+const advancedSettings = document.getElementById("advanced-settings");
 
 let activeJobId = null;
 let pollTimer = null;
@@ -21,11 +23,22 @@ let loadedResultUrl = null;
 let lastJob = null;
 let engineReady = false;
 
+const statusTimeoutMs = 15000;
 const exportControlIds = ["decimation", "textureSize"];
 const stepControlIds = ["ssSteps", "shapeSteps", "texSteps"];
+const storedControlIds = [
+  "seed",
+  ...stepControlIds,
+  ...exportControlIds,
+  "attentionBackend",
+  "maxTokens",
+  "lowVram",
+];
+const settingsStorageKey = "pixal3d.local.settings.v1";
 
 function setText(id, text, className = "") {
   const element = document.getElementById(id);
+  if (!element) return;
   element.textContent = text;
   element.className = className;
 }
@@ -40,31 +53,179 @@ function updateRangeValue(id) {
   });
 }
 
-stepControlIds.forEach(updateRangeValue);
-
-function generationProfileWarning() {
-  const resolution = Number(document.getElementById("resolution").value);
-  if (resolution !== 1536) {
-    return "";
-  }
-
-  return "1536 is unstable on this CUDA setup. Use 1024, then re-export Decimation/Texture.";
-}
-
 function syncGenerateButtonState() {
-  const warning = generationProfileWarning();
-  profileNote.textContent = warning;
-  profileNote.classList.toggle("warn", Boolean(warning));
   generateButton.disabled =
     !imageInput.files.length ||
     !engineReady ||
-    Boolean(warning) ||
     Boolean(lastJob && isJobBusy(lastJob));
 }
 
 function renderViewMode(mode = getViewMode()) {
   viewModeButton.textContent = `Mode: ${mode.label}`;
   viewModeButton.title = mode.description;
+}
+
+function restoreViewMode(modeId) {
+  if (typeof modeId !== "string") {
+    return;
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (getViewMode().id === modeId) {
+      return;
+    }
+    cycleViewMode();
+  }
+}
+
+function readStoredSettings() {
+  try {
+    const raw = localStorage.getItem(settingsStorageKey);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+let storedSettings = readStoredSettings();
+
+function writeStoredSettings(nextSettings) {
+  storedSettings = nextSettings;
+  try {
+    localStorage.setItem(settingsStorageKey, JSON.stringify(storedSettings));
+  } catch {
+    // Settings are convenience state only. The app should still work if storage is blocked.
+  }
+}
+
+function updateStoredSettings(patch) {
+  writeStoredSettings({ ...storedSettings, ...patch });
+}
+
+function storedControls() {
+  return storedSettings.controls && typeof storedSettings.controls === "object"
+    ? storedSettings.controls
+    : {};
+}
+
+function hasStoredValue(source, key) {
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
+function controlValue(element) {
+  if (element.type === "checkbox") {
+    return element.checked;
+  }
+
+  return element.value;
+}
+
+function numberValueInRange(element, value) {
+  if (value === "" || value === null || typeof value === "boolean") {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  const min = element.min === "" ? -Infinity : Number(element.min);
+  const max = element.max === "" ? Infinity : Number(element.max);
+  if (numericValue < min || numericValue > max) {
+    return null;
+  }
+
+  return String(numericValue);
+}
+
+function applyStoredControlValue(element, value) {
+  if (element.type === "checkbox") {
+    if (typeof value === "boolean") {
+      element.checked = value;
+    } else if (value === "true" || value === "false") {
+      element.checked = value === "true";
+    }
+    return;
+  }
+
+  if (element.tagName === "SELECT") {
+    const optionExists = Array.from(element.options).some((option) => option.value === String(value));
+    if (optionExists) {
+      element.value = String(value);
+    }
+    return;
+  }
+
+  if (element.type === "number" || element.type === "range") {
+    const nextValue = numberValueInRange(element, value);
+    if (nextValue !== null) {
+      element.value = nextValue;
+    }
+    return;
+  }
+
+  if (typeof value === "string") {
+    element.value = value;
+  }
+}
+
+function persistControlSetting(element) {
+  updateStoredSettings({
+    controls: {
+      ...storedControls(),
+      [element.id]: controlValue(element),
+    },
+  });
+}
+
+function persistCurrentSettings() {
+  const controls = {};
+  storedControlIds.forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) {
+      controls[id] = controlValue(element);
+    }
+  });
+
+  updateStoredSettings({
+    controls,
+    advancedOpen: Boolean(advancedSettings?.open),
+    viewMode: getViewMode().id,
+  });
+}
+
+function restoreStoredSettings() {
+  const controls = storedControls();
+  storedControlIds.forEach((id) => {
+    const element = document.getElementById(id);
+    if (element && hasStoredValue(controls, id)) {
+      applyStoredControlValue(element, controls[id]);
+    }
+  });
+
+  restoreViewMode(storedSettings.viewMode);
+
+  if (advancedSettings && typeof storedSettings.advancedOpen === "boolean") {
+    advancedSettings.open = storedSettings.advancedOpen;
+  }
+}
+
+function attachSettingsPersistence() {
+  storedControlIds.forEach((id) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    const eventName = element.type === "checkbox" || element.tagName === "SELECT" ? "change" : "input";
+    element.addEventListener(eventName, () => persistControlSetting(element));
+  });
+
+  advancedSettings?.addEventListener("toggle", () => {
+    updateStoredSettings({ advancedOpen: advancedSettings.open });
+  });
 }
 
 function setDownloadUrl(url, enabled = true) {
@@ -161,6 +322,31 @@ function isJobBusy(job) {
   return job.status === "queued" || job.status === "running" || job.exportStatus === "exporting";
 }
 
+async function fetchJson(url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(body || `${response.status} ${response.statusText}`);
+    }
+    return await response.json();
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function statusFailureMessage(error) {
+  if (error.name === "AbortError") {
+    return "The UI loaded, but /api/status did not answer within 15 seconds. The backend may still be starting, hung in a CUDA/Python check, or stopped. Click Refresh status, or restart START_PIXAL3D.bat if it keeps timing out.";
+  }
+  if (String(error.message).toLowerCase().includes("failed to fetch")) {
+    return "The UI loaded, but the status API is unreachable. The server may have stopped after serving this page. Restart START_PIXAL3D.bat.";
+  }
+  return `Status check failed: ${error.message}`;
+}
+
 async function loadResultIfReady(job) {
   if (job.status !== "complete" || job.exportStatus === "exporting" || !job.resultUrl) {
     return;
@@ -188,8 +374,15 @@ async function handleJobUpdate(job) {
 }
 
 async function refreshStatus() {
+  setText("server-status", "Checking...", "warn");
+  setText("gpu-status", "Checking...");
+  setText("model-status", "Checking...");
+  setText("engine-status", "Checking...");
+  setupNote.textContent = "";
+
   try {
-    const status = await fetch("/api/status").then((response) => response.json());
+    const status = await fetchJson("/api/status", statusTimeoutMs);
+    setText("server-status", "Status API ready", "ok");
 
     if (status.gpu.available) {
       const memory = status.gpu.memoryMB ? `, ${Math.round(status.gpu.memoryMB / 1024)} GB` : "";
@@ -223,8 +416,12 @@ async function refreshStatus() {
     syncGenerateButtonState();
   } catch (error) {
     engineReady = false;
+    setText("server-status", "Status API failed", "bad");
+    setText("gpu-status", "Not checked", "warn");
+    setText("model-status", "Not checked", "warn");
+    setText("engine-status", "Not checked", "warn");
     syncGenerateButtonState();
-    setupNote.textContent = `Status check failed: ${error.message}`;
+    setupNote.textContent = statusFailureMessage(error);
   }
 }
 
@@ -260,15 +457,18 @@ dropZone.addEventListener("drop", (event) => {
 
 document.getElementById("refresh-status").addEventListener("click", refreshStatus);
 document.getElementById("reset-view").addEventListener("click", resetView);
-document.getElementById("resolution").addEventListener("change", syncGenerateButtonState);
-viewModeButton.addEventListener("click", () => renderViewMode(cycleViewMode()));
+viewModeButton.addEventListener("click", () => {
+  const mode = cycleViewMode();
+  renderViewMode(mode);
+  updateStoredSettings({ viewMode: mode.id });
+});
 
 function formDataForJob() {
   const data = new FormData();
   data.append("image", imageInput.files[0]);
+  data.append("resolution", "1024");
   [
     "seed",
-    "resolution",
     "ssSteps",
     "shapeSteps",
     "texSteps",
@@ -284,10 +484,6 @@ function formDataForJob() {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!imageInput.files.length) return;
-  if (generationProfileWarning()) {
-    syncGenerateButtonState();
-    return;
-  }
 
   lastJob = null;
   loadedResultUrl = null;
@@ -453,6 +649,10 @@ exportControlIds.forEach((id) => {
   document.getElementById(id).addEventListener("change", requestReexportFromControls);
 });
 
+restoreStoredSettings();
+stepControlIds.forEach(updateRangeValue);
+attachSettingsPersistence();
+persistCurrentSettings();
 renderViewMode();
 syncGenerateButtonState();
 refreshStatus();

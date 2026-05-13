@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -70,6 +70,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/outputs", StaticFiles(directory=OUTPUTS_DIR), name="outputs")
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 app.mount("/three", StaticFiles(directory=THREE_DIR, check_dir=False), name="three")
+
+
+@app.middleware("http")
+async def add_local_ui_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _run(cmd: list[str], timeout: int = 10) -> tuple[int, str]:
