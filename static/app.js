@@ -1,4 +1,12 @@
-import { cycleViewMode, getViewMode, loadModel, resetView } from "/static/viewer.js?v=20260513-status";
+import {
+  cycleViewMode,
+  getAutoLevel,
+  getViewMode,
+  loadModel,
+  resetView,
+  setAutoLevel,
+  toggleAutoLevel,
+} from "/static/viewer.js?v=20260513-level";
 
 window.__pixal3dAppStarted = true;
 
@@ -14,6 +22,7 @@ const jobStage = document.getElementById("job-stage");
 const jobIdElement = document.getElementById("job-id");
 const setupNote = document.getElementById("setup-note");
 const viewModeButton = document.getElementById("view-mode");
+const levelButton = document.getElementById("level-model");
 const exportStatus = document.getElementById("export-status");
 const advancedSettings = document.getElementById("advanced-settings");
 
@@ -64,6 +73,13 @@ function syncGenerateButtonState() {
 function renderViewMode(mode = getViewMode()) {
   viewModeButton.textContent = `Mode: ${mode.label}`;
   viewModeButton.title = mode.description;
+}
+
+function renderLevelButton(enabled = getAutoLevel()) {
+  levelButton.textContent = `Level: ${enabled ? "On" : "Off"}`;
+  levelButton.title = enabled
+    ? "Auto-align the model support plane to the grid"
+    : "Show the model with its original GLB orientation";
 }
 
 function restoreViewMode(modeId) {
@@ -196,6 +212,7 @@ function persistCurrentSettings() {
     controls,
     advancedOpen: Boolean(advancedSettings?.open),
     viewMode: getViewMode().id,
+    autoLevel: getAutoLevel(),
   });
 }
 
@@ -209,6 +226,9 @@ function restoreStoredSettings() {
   });
 
   restoreViewMode(storedSettings.viewMode);
+  if (typeof storedSettings.autoLevel === "boolean") {
+    setAutoLevel(storedSettings.autoLevel);
+  }
 
   if (advancedSettings && typeof storedSettings.advancedOpen === "boolean") {
     advancedSettings.open = storedSettings.advancedOpen;
@@ -460,6 +480,11 @@ dropZone.addEventListener("drop", (event) => {
 
 document.getElementById("refresh-status").addEventListener("click", refreshStatus);
 document.getElementById("reset-view").addEventListener("click", resetView);
+levelButton.addEventListener("click", () => {
+  const enabled = toggleAutoLevel();
+  renderLevelButton(enabled);
+  updateStoredSettings({ autoLevel: enabled });
+});
 viewModeButton.addEventListener("click", () => {
   const mode = cycleViewMode();
   renderViewMode(mode);
@@ -658,5 +683,6 @@ stepControlIds.forEach(updateRangeValue);
 attachSettingsPersistence();
 persistCurrentSettings();
 renderViewMode();
+renderLevelButton();
 syncGenerateButtonState();
 refreshStatus();

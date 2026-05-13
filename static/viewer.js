@@ -57,6 +57,11 @@ const VIEW_MODES = [
 
 let viewModeIndex = VIEW_MODES.findIndex((mode) => mode.id === "textured");
 let currentModel = null;
+let autoLevelEnabled = true;
+
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const MAX_AUTO_LEVEL_ANGLE = THREE.MathUtils.degToRad(55);
+const MIN_AUTO_LEVEL_ANGLE = THREE.MathUtils.degToRad(1.5);
 
 function resizeRenderer() {
   const rect = canvas.parentElement.getBoundingClientRect();
@@ -137,6 +142,155 @@ function prepareModelMaterials(object) {
   });
 }
 
+function collectModelVertices(object, maxVertices = 18000) {
+  const vertices = [];
+  const vertex = new THREE.Vector3();
+  const meshes = [];
+  let totalVertices = 0;
+
+  object.updateWorldMatrix(true, true);
+  object.traverse((child) => {
+    const position = child.isMesh ? child.geometry?.attributes?.position : null;
+    if (!position) return;
+
+    meshes.push({ mesh: child, position });
+    totalVertices += position.count;
+  });
+
+  const step = Math.max(1, Math.ceil(totalVertices / maxVertices));
+  meshes.forEach(({ mesh, position }) => {
+    for (let index = 0; index < position.count; index += step) {
+      vertex.fromBufferAttribute(position, index).applyMatrix4(mesh.matrixWorld);
+      vertices.push(vertex.clone());
+    }
+  });
+
+  return vertices;
+}
+
+function solveLinear3(matrix, vector) {
+  const rows = matrix.map((row, index) => [...row, vector[index]]);
+
+  for (let pivot = 0; pivot < 3; pivot += 1) {
+    let bestRow = pivot;
+    for (let row = pivot + 1; row < 3; row += 1) {
+      if (Math.abs(rows[row][pivot]) > Math.abs(rows[bestRow][pivot])) {
+        bestRow = row;
+      }
+    }
+
+    if (Math.abs(rows[bestRow][pivot]) < 1e-8) {
+      return null;
+    }
+
+    if (bestRow !== pivot) {
+      [rows[pivot], rows[bestRow]] = [rows[bestRow], rows[pivot]];
+    }
+
+    const divisor = rows[pivot][pivot];
+    for (let column = pivot; column < 4; column += 1) {
+      rows[pivot][column] /= divisor;
+    }
+
+    for (let row = 0; row < 3; row += 1) {
+      if (row === pivot) continue;
+
+      const factor = rows[row][pivot];
+      for (let column = pivot; column < 4; column += 1) {
+        rows[row][column] -= factor * rows[pivot][column];
+      }
+    }
+  }
+
+  return [rows[0][3], rows[1][3], rows[2][3]];
+}
+
+function supportPlaneNormal(vertices) {
+  if (vertices.length < 24) return null;
+
+  let minY = Infinity;
+  let maxY = -Infinity;
+  vertices.forEach((point) => {
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  });
+
+  const spanY = Math.max(maxY - minY, 0.001);
+  const bottomLimit = minY + spanY * 0.16;
+  let supportPoints = vertices.filter((point) => point.y <= bottomLimit);
+
+  if (supportPoints.length < 24) {
+    supportPoints = [...vertices]
+      .sort((a, b) => a.y - b.y)
+      .slice(0, Math.max(24, Math.floor(vertices.length * 0.12)));
+  }
+
+  let sumX = 0;
+  let sumY = 0;
+  let sumZ = 0;
+  let sumXX = 0;
+  let sumZZ = 0;
+  let sumXZ = 0;
+  let sumXY = 0;
+  let sumZY = 0;
+
+  supportPoints.forEach((point) => {
+    sumX += point.x;
+    sumY += point.y;
+    sumZ += point.z;
+    sumXX += point.x * point.x;
+    sumZZ += point.z * point.z;
+    sumXZ += point.x * point.z;
+    sumXY += point.x * point.y;
+    sumZY += point.z * point.y;
+  });
+
+  const solution = solveLinear3(
+    [
+      [sumXX, sumXZ, sumX],
+      [sumXZ, sumZZ, sumZ],
+      [sumX, sumZ, supportPoints.length],
+    ],
+    [sumXY, sumZY, sumY],
+  );
+
+  if (!solution) return null;
+
+  const [slopeX, slopeZ] = solution;
+  const normal = new THREE.Vector3(-slopeX, 1, -slopeZ).normalize();
+  if (normal.y < 0) {
+    normal.negate();
+  }
+
+  const angle = normal.angleTo(WORLD_UP);
+  if (!Number.isFinite(angle) || angle < MIN_AUTO_LEVEL_ANGLE || angle > MAX_AUTO_LEVEL_ANGLE) {
+    return null;
+  }
+
+  return normal;
+}
+
+function placeModelOnGrid() {
+  if (!currentModel) return;
+
+  currentModel.position.set(0, 0, 0);
+  currentModel.quaternion.identity();
+  currentModel.updateWorldMatrix(true, true);
+
+  if (autoLevelEnabled) {
+    const normal = supportPlaneNormal(collectModelVertices(currentModel));
+    if (normal) {
+      currentModel.quaternion.setFromUnitVectors(normal, WORLD_UP);
+      currentModel.updateWorldMatrix(true, true);
+    }
+  }
+
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const center = box.getCenter(new THREE.Vector3());
+  currentModel.position.set(-center.x, -box.min.y, -center.z);
+  currentModel.updateWorldMatrix(true, true);
+}
+
 function applyViewMode() {
   if (!currentModel) return;
 
@@ -161,18 +315,18 @@ export async function loadModel(url, { resetViewOnLoad = true } = {}) {
     disposeObject(currentModel);
   }
 
-  currentModel = gltf.scene;
+  currentModel = new THREE.Group();
+  currentModel.name = "Pixal3DPreviewRoot";
+  currentModel.add(gltf.scene);
   prepareModelMaterials(currentModel);
 
-  const box = new THREE.Box3().setFromObject(currentModel);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const largest = Math.max(size.x, size.y, size.z, 0.001);
-
-  currentModel.position.sub(center);
   scene.add(currentModel);
+  placeModelOnGrid();
   applyViewMode();
 
+  const box = new THREE.Box3().setFromObject(currentModel);
+  const size = box.getSize(new THREE.Vector3());
+  const largest = Math.max(size.x, size.y, size.z, 0.001);
   const distance = largest * 2.2;
   camera.near = Math.max(0.001, largest / 1000);
   camera.far = Math.max(1000, largest * 20);
@@ -183,6 +337,20 @@ export async function loadModel(url, { resetViewOnLoad = true } = {}) {
   }
   controls.update();
   viewerElement.classList.add("has-model");
+}
+
+export function getAutoLevel() {
+  return autoLevelEnabled;
+}
+
+export function setAutoLevel(enabled) {
+  autoLevelEnabled = Boolean(enabled);
+  placeModelOnGrid();
+  return autoLevelEnabled;
+}
+
+export function toggleAutoLevel() {
+  return setAutoLevel(!autoLevelEnabled);
 }
 
 export function getViewMode() {
