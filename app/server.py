@@ -269,6 +269,26 @@ def _output_url(job_id: str, output_path: Path) -> str:
     return f"/outputs/{job_id}/{output_path.name}"
 
 
+def _diagnose_failure(job: dict[str, Any]) -> str:
+    log_text = "\n".join(job.get("log", [])[-80:])
+    lower = log_text.lower()
+    if "cuda driver error: device not ready" in lower:
+        return "CUDA driver became unavailable during generation. Try 1024 resolution or fewer sampling steps, then re-export Decimation/Texture from the completed model."
+    if "cuda out of memory" in lower or "outofmemoryerror" in lower:
+        return "CUDA ran out of memory. Try lower resolution, fewer sampling steps, lower max tokens, or Low VRAM mode."
+    if "cuda is not available" in lower:
+        return "CUDA is not available to the Pixal3D backend. Check the WSL CUDA setup before generating."
+    if "no module named 'flash_attn'" in lower:
+        return "The selected Attention backend is not installed in WSL. Use flash_attn_3 in this setup."
+    if "huggingface.co/ckpts/" in lower or "repository not found for url: https://huggingface.co/ckpts/" in lower:
+        return "Pixal3D tried to download a local checkpoint from Hugging Face. Restart the WSL backend and run generation again so the local checkpoint loader is used."
+    if "boolean value of tensor with no values is ambiguous" in lower:
+        return "flash_attn_3 failed while initializing a Pixal3D model. Retry with Attention set to flash_attn."
+    if "no such file or directory" in lower and "pixal3d" in lower:
+        return "Pixal3D backend files are missing. Run the setup script before generating."
+    return "Generation failed before a reusable export state was created."
+
+
 def _run_generation(job_id: str) -> None:
     with jobs_lock:
         job = jobs[job_id]
@@ -364,8 +384,15 @@ def _run_generation(job_id: str) -> None:
             resultUrl=_output_url(job_id, output_path),
         )
     else:
+        failure_reason = _diagnose_failure(job)
         _append_log(job, f"Pixal3D exited with code {exit_code}")
-        _set_job(job_id, status="failed", stage=f"Failed with code {exit_code}", finishedAt=time.time())
+        _set_job(
+            job_id,
+            status="failed",
+            stage=failure_reason,
+            failureReason=failure_reason,
+            finishedAt=time.time(),
+        )
 
 
 def _run_export(job_id: str, decimation: int, texture_size: int, output_path: str) -> None:
@@ -540,6 +567,7 @@ async def create_job(
         "exportFinishedAt": None,
         "exportError": None,
         "pendingExport": None,
+        "failureReason": None,
         "logPath": str(job_output_dir / "run.log"),
         "log": [],
         "params": {
@@ -653,6 +681,7 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "exportFinishedAt": job.get("exportFinishedAt"),
         "exportError": job.get("exportError"),
         "pendingExport": job.get("pendingExport"),
+        "failureReason": job.get("failureReason"),
         "params": job["params"],
         "log": job["log"][-120:],
     }

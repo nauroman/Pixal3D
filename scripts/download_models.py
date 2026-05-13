@@ -46,6 +46,14 @@ def has_transformers_checkpoint(model_dir: Path) -> bool:
     return has_config and has_weights
 
 
+def local_model_reference(model_dir: Path) -> str:
+    model_dir = model_dir.resolve()
+    try:
+        return model_dir.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(model_dir)
+
+
 def patch_pipeline_json(models_dir: Path, prefer_rmbg2: bool = True) -> None:
     pipeline_path = models_dir / "Pixal3D" / "pipeline.json"
     if not pipeline_path.exists():
@@ -58,11 +66,11 @@ def patch_pipeline_json(models_dir: Path, prefer_rmbg2: bool = True) -> None:
     birefnet_dir = models_dir / "BiRefNet"
     rembg_dir = rmbg2_dir if prefer_rmbg2 and has_transformers_checkpoint(rmbg2_dir) else birefnet_dir
     if rembg_dir.exists():
-        args.setdefault("rembg_model", {}).setdefault("args", {})["model_name"] = str(rembg_dir)
+        args.setdefault("rembg_model", {}).setdefault("args", {})["model_name"] = local_model_reference(rembg_dir)
 
     dino_dir = models_dir / "dinov3-vitl16-pretrain-lvd1689m"
     if dino_dir.exists():
-        args.setdefault("image_cond_model", {}).setdefault("args", {})["model_name"] = str(dino_dir)
+        args.setdefault("image_cond_model", {}).setdefault("args", {})["model_name"] = local_model_reference(dino_dir)
 
     pipeline_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(f"Patched local pipeline.json: {pipeline_path}")

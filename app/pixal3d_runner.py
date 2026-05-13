@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -43,11 +44,23 @@ IMAGE_COND_CONFIGS = {
 
 MIN_SAFE_DECIMATION_TARGET = 30000
 EXPORT_STATE_VERSION = 1
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def models_dir() -> Path:
+    return Path(os.environ.get("PIXAL3D_MODELS_DIR", str(ROOT / "models"))).resolve()
+
+
+def local_model_reference(model_dir: Path) -> str:
+    model_dir = model_dir.resolve()
+    try:
+        return model_dir.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(model_dir)
 
 
 def _local_model(repo_id: str, local_name: str) -> str:
-    models_dir = Path(os.environ.get("PIXAL3D_MODELS_DIR", "models")).resolve()
-    candidate = models_dir / local_name
+    candidate = models_dir() / local_name
     if candidate.exists() and any(candidate.iterdir()):
         return str(candidate)
     return repo_id
@@ -70,12 +83,124 @@ def build_image_cond_model(config: dict):
 def load_moge_model(device: str = "cuda"):
     from moge.model.v2 import MoGeModel
 
-    models_dir = Path(os.environ.get("PIXAL3D_MODELS_DIR", "models")).resolve()
-    local_checkpoint = models_dir / "moge-2-vitl" / "model.pt"
+    local_checkpoint = models_dir() / "moge-2-vitl" / "model.pt"
     model_name = str(local_checkpoint) if local_checkpoint.exists() else "Ruicheng/moge-2-vitl"
     moge_model = MoGeModel.from_pretrained(model_name).to(device)
     moge_model.eval()
     return moge_model
+
+
+def has_transformers_checkpoint(model_dir: Path) -> bool:
+    if not model_dir.exists():
+        return False
+    has_config = (model_dir / "config.json").exists()
+    has_weights = any(model_dir.glob("*.safetensors")) or (model_dir / "pytorch_model.bin").exists()
+    return has_config and has_weights
+
+
+def refresh_local_pipeline_paths(model_path: str) -> str:
+    candidate = Path(model_path)
+    if not candidate.exists():
+        return model_path
+
+    pipeline_path = candidate / "pipeline.json"
+    if not pipeline_path.exists():
+        return model_path
+
+    local_models = models_dir()
+    data = json.loads(pipeline_path.read_text(encoding="utf-8"))
+    args = data.setdefault("args", {})
+
+    dino_dir = local_models / "dinov3-vitl16-pretrain-lvd1689m"
+    if dino_dir.exists():
+        args.setdefault("image_cond_model", {}).setdefault("args", {})["model_name"] = local_model_reference(dino_dir)
+
+    rmbg2_dir = local_models / "RMBG-2.0"
+    birefnet_dir = local_models / "BiRefNet"
+    rembg_dir = rmbg2_dir if has_transformers_checkpoint(rmbg2_dir) else birefnet_dir
+    if rembg_dir.exists():
+        args.setdefault("rembg_model", {}).setdefault("args", {})["model_name"] = local_model_reference(rembg_dir)
+
+    pipeline_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return str(candidate)
+
+
+def checkpoint_files(checkpoint_stem: Path) -> tuple[Path, Path]:
+    return Path(f"{checkpoint_stem}.json"), Path(f"{checkpoint_stem}.safetensors")
+
+
+def resolve_local_model_args(args: dict) -> dict:
+    for section in ("image_cond_model", "rembg_model"):
+        model_args = args.get(section, {}).get("args", {})
+        model_name = model_args.get("model_name")
+        if not isinstance(model_name, str):
+            continue
+        candidate = Path(model_name)
+        if candidate.is_absolute():
+            continue
+        project_candidate = ROOT / candidate
+        if project_candidate.exists():
+            model_args["model_name"] = str(project_candidate)
+    return args
+
+
+def install_local_checkpoint_loader() -> None:
+    from pixal3d import models
+    from pixal3d.pipelines import base
+
+    def from_pretrained(cls, path: str, config_file: str = "pipeline.json"):
+        path_root = Path(path)
+        local_config_file = path_root / config_file
+        if not local_config_file.exists():
+            return base.Pipeline._pixal3d_original_from_pretrained.__func__(cls, path, config_file)
+
+        args = resolve_local_model_args(json.loads(local_config_file.read_text(encoding="utf-8"))["args"])
+        loaded_models = {}
+        for name, checkpoint in args["models"].items():
+            if hasattr(cls, "model_names_to_load") and name not in cls.model_names_to_load:
+                continue
+
+            local_stem = path_root / checkpoint
+            local_json, local_weights = checkpoint_files(local_stem)
+            if local_json.exists() and local_weights.exists():
+                try:
+                    loaded_models[name] = models.from_pretrained(str(local_stem))
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to load local Pixal3D checkpoint '{name}' from {local_stem}."
+                    ) from exc
+            else:
+                loaded_models[name] = models.from_pretrained(checkpoint)
+
+        pipeline = cls(loaded_models)
+        pipeline._pretrained_args = args
+        return pipeline
+
+    if not hasattr(base.Pipeline, "_pixal3d_original_from_pretrained"):
+        base.Pipeline._pixal3d_original_from_pretrained = base.Pipeline.from_pretrained
+        base.Pipeline.from_pretrained = classmethod(from_pretrained)
+
+
+def exception_chain_text(exc: BaseException) -> str:
+    parts = []
+    current: BaseException | None = exc
+    while current is not None:
+        parts.append(f"{type(current).__name__}: {current}")
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts).lower()
+
+
+def set_attention_backend(backend: str) -> None:
+    os.environ["ATTN_BACKEND"] = backend
+    os.environ["SPARSE_ATTN_BACKEND"] = backend
+    try:
+        from pixal3d.modules.attention import config as attention_config
+        from pixal3d.modules.sparse import config as sparse_config
+
+        attention_config.set_backend(backend)
+        sparse_config.set_attn_backend(backend)
+    except Exception:
+        pass
 
 
 def compute_f_pixels(camera_angle_x: float, resolution: int) -> float:
@@ -233,11 +358,11 @@ def main() -> int:
     args = parse_args()
     pixal3d_dir = Path(args.pixal3d_dir).resolve()
     sys.path.insert(0, str(pixal3d_dir))
+    model_path = refresh_local_pipeline_paths(args.model_path)
 
     os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    os.environ["ATTN_BACKEND"] = args.attention_backend
-    os.environ["SPARSE_ATTN_BACKEND"] = args.attention_backend
+    set_attention_backend(args.attention_backend)
     os.environ.setdefault("SPARSE_CONV_BACKEND", "flex_gemm")
     os.environ["FLEX_GEMM_AUTOTUNE_CACHE_PATH"] = str(pixal3d_dir / "autotune_cache.json")
     os.environ.setdefault("FLEX_GEMM_AUTOTUNER_VERBOSE", "1")
@@ -261,9 +386,15 @@ def main() -> int:
 
     from pixal3d.pipelines import Pixal3DImageTo3DPipeline
     import o_voxel
+    install_local_checkpoint_loader()
 
-    print(f"[Pipeline] Loading from {args.model_path}")
-    pipeline = Pixal3DImageTo3DPipeline.from_pretrained(args.model_path)
+    print(f"[Pipeline] Loading from {model_path}")
+    try:
+        pipeline = Pixal3DImageTo3DPipeline.from_pretrained(model_path)
+    except Exception as exc:
+        if args.attention_backend == "flash_attn_3" and "boolean value of tensor with no values is ambiguous" in exception_chain_text(exc):
+            print("[Pipeline] flash_attn_3 failed during model initialization. Local checkpoint fallback is disabled; showing the real initialization error.")
+        raise
 
     print("[ImageCond] Building DINOv3 projection models")
     pipeline.image_cond_model_ss = build_image_cond_model(IMAGE_COND_CONFIGS["ss"])

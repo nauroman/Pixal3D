@@ -1,5 +1,7 @@
 set -e
-cd "/mnt/c/Users/user/Documents/New project"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+cd "$project_root"
 
 if ! command -v gcc >/dev/null 2>&1 || ! command -v git-lfs >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1 || [ ! -e /usr/include/jpeglib.h ]; then
   sudo apt update
@@ -26,13 +28,13 @@ conda activate pixal3d
 python -m pip install --upgrade pip wheel setuptools packaging ninja
 python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 python -m pip install -r requirements-app.txt
-python -m pip install -r "/mnt/c/Users/user/Documents/New project/vendor/Pixal3D/requirements-hfdemo.txt"
+python -m pip install -r "$project_root/vendor/Pixal3D/requirements-hfdemo.txt"
 python -m pip install git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
-cd "/mnt/c/Users/user/Documents/New project/vendor/Pixal3D"
+cd "$project_root/vendor/Pixal3D"
 python -m pip install --force-reinstall --no-deps https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl
 
-cd "/mnt/c/Users/user/Documents/New project"
+cd "$project_root"
 python scripts/download_models.py --skip-existing
 
 python - <<'PY'

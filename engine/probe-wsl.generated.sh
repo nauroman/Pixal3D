@@ -1,5 +1,7 @@
 set -e
-cd "/mnt/c/Users/user/Documents/New project"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+cd "$project_root"
 test -f "$HOME/miniforge3/etc/profile.d/conda.sh"
 source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate pixal3d

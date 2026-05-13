@@ -229,7 +229,25 @@ function startPolling() {
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     if (!activeJobId) return;
-    const job = await fetch(`/api/jobs/${activeJobId}`).then((response) => response.json());
+    let job;
+    try {
+      const response = await fetch(`/api/jobs/${activeJobId}`);
+      if (!response.ok) {
+        throw new Error(response.status === 404 ? "Job no longer exists on the server." : await response.text());
+      }
+      job = await response.json();
+    } catch (error) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      activeJobId = null;
+      lastJob = null;
+      jobTitle.textContent = "Job unavailable";
+      jobStage.textContent = error.message;
+      setExportStatus("Start a new generation to create a fresh export state.", "warn");
+      generateButton.disabled = !imageInput.files.length;
+      setExportControlsDisabled(false);
+      return;
+    }
     await handleJobUpdate(job);
     if (!isJobBusy(job) && (job.status === "complete" || job.status === "failed")) {
       clearInterval(pollTimer);
@@ -324,6 +342,10 @@ function renderJob(job) {
     jobTitle.textContent = "Export failed";
     jobStage.textContent = job.exportStage || "Previous GLB is still loaded.";
     setExportStatus("Export failed. Previous GLB is still loaded.", "bad");
+  } else if (job.status === "failed") {
+    jobTitle.textContent = "Job failed";
+    jobStage.textContent = job.failureReason || job.stage || "Generation failed";
+    setExportStatus("No GLB was created for this run.", "bad");
   } else {
     jobTitle.textContent = job.status === "complete" ? "Model ready" : `Job ${job.status}`;
     jobStage.textContent = job.status === "complete" ? completeStageText(job) : job.stage;

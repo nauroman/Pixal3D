@@ -26,7 +26,7 @@ function Invoke-WslQuiet {
     $previousErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "SilentlyContinue"
-        $output = & wsl @Arguments 2>$null
+        $output = & wsl.exe --exec @Arguments 2>$null
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -59,14 +59,11 @@ function Get-WslIp {
 }
 
 function Test-WslBackend {
-    $wslRoot = Get-WslPath $Root
-    if (-not $wslRoot) {
-        return $false
-    }
-
     $probeScript = @'
 set -e
-cd "__WSL_ROOT__"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+cd "$project_root"
 test -f "$HOME/miniforge3/etc/profile.d/conda.sh"
 source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate pixal3d
@@ -88,7 +85,6 @@ print("ready")
 PY
 '@
 
-    $probeScript = $probeScript.Replace("__WSL_ROOT__", $wslRoot)
     $probeScriptPath = Join-Path $LogDir "probe-wsl.generated.sh"
     [System.IO.File]::WriteAllText($probeScriptPath, $probeScript.Replace("`r`n", "`n"), $Utf8NoBom)
     $wslProbeScriptPath = Get-WslPath $probeScriptPath
@@ -190,13 +186,15 @@ function Start-WslServer {
 
     $launchScript = @'
 set -e
-cd "__WSL_ROOT__"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+cd "$project_root"
 source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate pixal3d
 exec python -m uvicorn app.server:app --host 0.0.0.0 --port __PORT__
 '@
 
-    $launchScript = $launchScript.Replace("__WSL_ROOT__", $wslRoot).Replace("__PORT__", "$Port")
+    $launchScript = $launchScript.Replace("__PORT__", "$Port")
     $launchScriptPath = Join-Path $LogDir "launch-wsl.generated.sh"
     [System.IO.File]::WriteAllText($launchScriptPath, $launchScript.Replace("`r`n", "`n"), $Utf8NoBom)
     $wslLaunchScriptPath = Get-WslPath $launchScriptPath
@@ -205,7 +203,7 @@ exec python -m uvicorn app.server:app --host 0.0.0.0 --port __PORT__
     }
 
     return Start-Process -FilePath "wsl.exe" `
-        -ArgumentList "bash `"$wslLaunchScriptPath`"" `
+        -ArgumentList @("--exec", "bash", "`"$wslLaunchScriptPath`"") `
         -WorkingDirectory $Root `
         -RedirectStandardOutput $StdoutLog `
         -RedirectStandardError $StderrLog `
