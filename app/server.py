@@ -30,6 +30,7 @@ ENGINE_DIR = ROOT / "engine"
 THREE_DIR = ROOT / "node_modules" / "three"
 MIN_SAFE_DECIMATION_TARGET = 30000
 TEXTURE_SIZE_OPTIONS = {1024, 2048, 4096}
+MAX_TRANSIENT_BACKEND_RETRIES = 1
 
 for directory in (UPLOADS_DIR, OUTPUTS_DIR, MODELS_DIR, ENGINE_DIR):
     directory.mkdir(parents=True, exist_ok=True)
@@ -197,6 +198,13 @@ import json
 mods = ["torch", "o_voxel", "moge", "nvdiffrast", "flex_gemm", "cumesh", "natten"]
 data = {module: importlib.util.find_spec(module) is not None for module in mods}
 data["attention"] = any(importlib.util.find_spec(module) is not None for module in ["flash_attn", "flash_attn_interface", "xformers"])
+try:
+    import transformers
+
+    data["transformers"] = True
+except Exception as exc:
+    data["transformers"] = False
+    data["transformersError"] = str(exc)
 data["nattenCuda"] = False
 try:
     import torch
@@ -261,6 +269,16 @@ def _validate_texture_size(texture_size: int) -> int:
     return texture_size
 
 
+def _is_transformers_import_failure(log_text: str) -> bool:
+    lower = log_text.lower()
+    return (
+        "transformers" in lower
+        and "import_utils.py" in lower
+        and "fetch__all__" in lower
+        and "too many values to unpack" in lower
+    )
+
+
 def _export_filename(decimation: int, texture_size: int) -> str:
     return f"model_d{decimation}_t{texture_size}.glb"
 
@@ -269,9 +287,15 @@ def _output_url(job_id: str, output_path: Path) -> str:
     return f"/outputs/{job_id}/{output_path.name}"
 
 
-def _diagnose_failure(job: dict[str, Any]) -> str:
-    log_text = "\n".join(job.get("log", [])[-80:])
+def _diagnose_failure(job: dict[str, Any], log_lines: list[str] | None = None) -> str:
+    source_lines = log_lines if log_lines is not None else job.get("log", [])
+    log_text = "\n".join(source_lines[-80:])
     lower = log_text.lower()
+    if _is_transformers_import_failure(log_text):
+        return (
+            "Transformers failed while importing before Pixal3D loaded. "
+            "The automatic retry also failed; restart the WSL backend or reinstall the Pixal3D Python env if it repeats."
+        )
     if "cuda driver error: device not ready" in lower:
         return "CUDA driver became unavailable during generation. Try 1024 resolution or fewer sampling steps, then re-export Decimation/Texture from the completed model."
     if "cuda out of memory" in lower or "outofmemoryerror" in lower:
@@ -346,34 +370,61 @@ def _run_generation(job_id: str) -> None:
     env["PYTHONUNBUFFERED"] = "1"
     env["PIXAL3D_MODELS_DIR"] = str(MODELS_DIR)
 
-    try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
+    attempts = MAX_TRANSIENT_BACKEND_RETRIES + 1
+    exit_code = 1
+    last_attempt_log: list[str] = []
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            _set_job(job_id, stage="Retrying backend after import failure")
+            _append_log(job, f"[Retry] Starting backend attempt {attempt}/{attempts}.")
+
+        attempt_log_start = len(job["log"])
+        try:
+            process = subprocess.Popen(
+                cmd,
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                _append_log(job, line)
+                lower = line.lower()
+                if "loading" in lower:
+                    _set_job(job_id, stage="Loading models")
+                elif "camera" in lower:
+                    _set_job(job_id, stage="Estimating camera")
+                elif "running 3d" in lower or "generation" in lower:
+                    _set_job(job_id, stage="Generating 3D asset")
+                elif "extracting" in lower or "to_glb" in lower or "glb" in lower:
+                    _set_job(job_id, stage="Exporting GLB")
+            exit_code = process.wait()
+        except Exception as exc:
+            _append_log(job, f"Backend launch failed: {exc}")
+            _set_job(job_id, status="failed", stage="Backend launch failed", finishedAt=time.time())
+            return
+
+        last_attempt_log = list(job["log"][attempt_log_start:])
+        if exit_code == 0:
+            break
+
+        attempt_log_text = "\n".join(last_attempt_log)
+        should_retry = (
+            attempt < attempts
+            and not state_path.exists()
+            and _is_transformers_import_failure(attempt_log_text)
         )
-        assert process.stdout is not None
-        for line in process.stdout:
-            _append_log(job, line)
-            lower = line.lower()
-            if "loading" in lower:
-                _set_job(job_id, stage="Loading models")
-            elif "camera" in lower:
-                _set_job(job_id, stage="Estimating camera")
-            elif "running 3d" in lower or "generation" in lower:
-                _set_job(job_id, stage="Generating 3D asset")
-            elif "extracting" in lower or "to_glb" in lower or "glb" in lower:
-                _set_job(job_id, stage="Exporting GLB")
-        exit_code = process.wait()
-    except Exception as exc:
-        _append_log(job, f"Backend launch failed: {exc}")
-        _set_job(job_id, status="failed", stage="Backend launch failed", finishedAt=time.time())
-        return
+        if not should_retry:
+            break
+
+        _append_log(
+            job,
+            "[Retry] Detected transient Transformers import failure before export state; retrying once.",
+        )
 
     if exit_code == 0 and output_path.exists():
         _set_job(
@@ -384,7 +435,7 @@ def _run_generation(job_id: str) -> None:
             resultUrl=_output_url(job_id, output_path),
         )
     else:
-        failure_reason = _diagnose_failure(job)
+        failure_reason = _diagnose_failure(job, last_attempt_log)
         _append_log(job, f"Pixal3D exited with code {exit_code}")
         _set_job(
             job_id,

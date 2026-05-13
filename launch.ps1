@@ -76,6 +76,7 @@ if missing:
     print("missing:" + ",".join(missing))
     raise SystemExit(1)
 
+import transformers
 import torch
 if not torch.cuda.is_available():
     print("cuda:false")
