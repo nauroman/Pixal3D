@@ -2,9 +2,13 @@
 
 A local Windows wrapper for TencentARC Pixal3D. It provides an HTML page for image upload, generation settings, Three.js GLB preview, and downloading the generated textured `.glb` model.
 
-## Screenshot
+## Screenshots
 
-![Pixal3D Local UI screenshot](screenshots/screenshot.jpg)
+![Pixal3D Local UI screenshot 1](screenshots/screenshot.jpg)
+
+![Pixal3D Local UI screenshot 2](screenshots/screenshot%202.jpg)
+
+![Pixal3D Local UI screenshot 3](screenshots/screenshot%203.jpg)
 
 ## Quick Start
 
