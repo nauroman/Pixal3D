@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "static"
 UPLOADS_DIR = ROOT / "uploads"
 OUTPUTS_DIR = ROOT / "outputs"
-MODELS_DIR = ROOT / "models"
+MODELS_DIR = Path(os.environ.get("PIXAL3D_MODELS_DIR", str(ROOT / "models"))).expanduser().resolve()
 PIXAL3D_DIR = ROOT / "vendor" / "Pixal3D"
 TRELLIS2_DIR = ROOT / "vendor" / "TRELLIS.2"
 ENGINE_DIR = ROOT / "engine"
@@ -103,6 +103,69 @@ def _human_size(size: int) -> str:
             return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
         value /= 1024
     return f"{size} B"
+
+
+def _directory_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            file_path = Path(root) / name
+            try:
+                total += file_path.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _is_safe_cache_target(path: Path) -> bool:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+
+    project_models = (ROOT / "models").resolve()
+    wsl_models = (Path.home() / ".cache" / "pixal3d" / "models").resolve()
+    return resolved in {project_models, wsl_models}
+
+
+def _cache_targets() -> list[dict[str, Any]]:
+    candidates = [
+        ("Active model cache", MODELS_DIR),
+        ("Project model cache", ROOT / "models"),
+    ]
+    targets = []
+    seen: set[str] = set()
+    for label, path in candidates:
+        if not _is_safe_cache_target(path):
+            continue
+        resolved = path.expanduser().resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        size = _directory_size(resolved)
+        targets.append(
+            {
+                "label": label,
+                "path": key,
+                "exists": resolved.exists(),
+                "size": size,
+                "sizeText": _human_size(size),
+            }
+        )
+    return targets
+
+
+def _cache_status() -> dict[str, Any]:
+    targets = _cache_targets()
+    total_size = sum(target["size"] for target in targets)
+    return {
+        "size": total_size,
+        "sizeText": _human_size(total_size),
+        "targets": targets,
+    }
 
 
 def _pixal3d_model_dir() -> Path:
@@ -269,6 +332,10 @@ def _set_job(job_id: str, **values: Any) -> None:
             jobs[job_id].update(values)
 
 
+def _job_is_busy(job: dict[str, Any]) -> bool:
+    return job.get("status") in {"queued", "running"} or job.get("exportStatus") == "exporting"
+
+
 def _normalize_decimation(decimation: int) -> int:
     return max(int(decimation), MIN_SAFE_DECIMATION_TARGET)
 
@@ -332,6 +399,8 @@ def _diagnose_failure(job: dict[str, Any], log_lines: list[str] | None = None) -
         return "Pixal3D tried to download a local checkpoint from Hugging Face. Restart the WSL backend and run generation again so the local checkpoint loader is used."
     if "boolean value of tensor with no values is ambiguous" in lower:
         return "flash_attn_3 failed while initializing a Pixal3D model. Retry with Attention set to flash_attn."
+    if "zero-size array to reduction operation minimum which has no identity" in lower:
+        return "Background removal found no foreground object. Use an object-focused image, or a PNG/WebP with a transparent background."
     if "no such file or directory" in lower and "pixal3d" in lower:
         return "Pixal3D backend files are missing. Run the setup script before generating."
     return "Generation failed before a reusable export state was created."
@@ -586,7 +655,34 @@ def status() -> dict[str, Any]:
         "gpu": _gpu_status(),
         "wsl": _wsl_status(),
         "model": _model_status(),
+        "cache": _cache_status(),
         "engine": _engine_status(),
+    }
+
+
+@app.delete("/api/cache")
+def clear_cache() -> dict[str, Any]:
+    with jobs_lock:
+        if any(_job_is_busy(job) for job in jobs.values()):
+            raise HTTPException(status_code=409, detail="cache cannot be cleared while a job is running")
+
+    before = _cache_status()
+    removed_targets = []
+    for target in before["targets"]:
+        path = Path(target["path"])
+        if target["exists"]:
+            shutil.rmtree(path, ignore_errors=True)
+            removed_targets.append(target)
+
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    after = _cache_status()
+    removed_size = max(0, before["size"] - after["size"])
+    return {
+        "cleared": True,
+        "removedSize": removed_size,
+        "removedSizeText": _human_size(removed_size),
+        "removedTargets": removed_targets,
+        "cache": after,
     }
 
 

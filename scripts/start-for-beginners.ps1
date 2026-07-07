@@ -318,7 +318,39 @@ function Setup-WindowsUi {
 }
 
 function Setup-ModelFiles {
+    param([switch]$UseWsl)
+
     Write-Step "Downloading Pixal3D model files if missing."
+    if ($UseWsl) {
+        Write-Host "This downloads the official Pixal3D checkpoints and helper models into the WSL filesystem for much faster CUDA loading."
+
+        $engineDir = Join-Path $Root "engine"
+        New-Item -ItemType Directory -Force -Path $engineDir | Out-Null
+        $scriptPath = Join-Path $engineDir "download-models-wsl.generated.sh"
+        $script = @'
+set -e
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+cd "$project_root"
+source "$HOME/miniforge3/etc/profile.d/conda.sh"
+conda activate pixal3d
+export PIXAL3D_MODELS_DIR="${PIXAL3D_MODELS_DIR:-$HOME/.cache/pixal3d/models}"
+mkdir -p "$PIXAL3D_MODELS_DIR"
+python scripts/download_models.py --models-dir "$PIXAL3D_MODELS_DIR" --skip-existing
+'@
+        [System.IO.File]::WriteAllText($scriptPath, $script.Replace("`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))
+        $wslScriptPath = Get-WslPath $scriptPath
+        if (-not $wslScriptPath) {
+            throw "Could not convert model download script path for WSL: $scriptPath"
+        }
+
+        & wsl.exe --exec bash "$wslScriptPath"
+        if ($LASTEXITCODE -ne 0) {
+            throw "WSL model download failed with exit code $LASTEXITCODE."
+        }
+        return
+    }
+
     Write-Host "This downloads the official Pixal3D checkpoints and helper models into models/. The main checkpoint set is about 22 GB and interrupted downloads can be resumed."
     & (Join-Path $Root "scripts\download-models.ps1")
 }
@@ -444,7 +476,7 @@ function Setup-WslBackend {
 
     if (Test-WslBackendReady) {
         Write-Host "WSL/CUDA backend is already ready."
-        Setup-ModelFiles
+        Setup-ModelFiles -UseWsl
         return $true
     }
 
@@ -465,7 +497,7 @@ function Setup-WslBackend {
         return $false
     }
 
-    Setup-ModelFiles
+    Setup-ModelFiles -UseWsl
     return $true
 }
 

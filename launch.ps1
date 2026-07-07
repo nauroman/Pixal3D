@@ -192,6 +192,7 @@ project_root="$(cd "$script_dir/.." && pwd)"
 cd "$project_root"
 source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate pixal3d
+export PIXAL3D_MODELS_DIR="${PIXAL3D_MODELS_DIR:-$HOME/.cache/pixal3d/models}"
 exec python -m uvicorn app.server:app --host 0.0.0.0 --port __PORT__
 '@
 

@@ -25,6 +25,7 @@ const viewModeButton = document.getElementById("view-mode");
 const levelButton = document.getElementById("level-model");
 const exportStatus = document.getElementById("export-status");
 const advancedSettings = document.getElementById("advanced-settings");
+const clearCacheButton = document.getElementById("clear-cache");
 
 let activeJobId = null;
 let pollTimer = null;
@@ -32,6 +33,7 @@ let loadedResultUrl = null;
 let loadedResultJobId = null;
 let lastJob = null;
 let engineReady = false;
+let cacheSize = 0;
 
 const statusTimeoutMs = 15000;
 const exportControlIds = ["decimation", "textureSize"];
@@ -68,6 +70,10 @@ function syncGenerateButtonState() {
     !imageInput.files.length ||
     !engineReady ||
     Boolean(lastJob && isJobBusy(lastJob));
+}
+
+function syncCacheButtonState() {
+  clearCacheButton.disabled = Boolean(lastJob && isJobBusy(lastJob)) || cacheSize <= 0;
 }
 
 function renderViewMode(mode = getViewMode()) {
@@ -389,6 +395,7 @@ async function handleJobUpdate(job) {
   renderJob(job);
   setExportControlsDisabled(isJobBusy(job));
   syncGenerateButtonState();
+  syncCacheButtonState();
   if (job.exportStatus === "exporting") {
     setDownloadUrl(job.resultUrl || loadedResultUrl, false);
   } else {
@@ -400,6 +407,7 @@ async function refreshStatus() {
   setText("server-status", "Checking...", "warn");
   setText("gpu-status", "Checking...");
   setText("model-status", "Checking...");
+  setText("cache-status", "Checking...");
   setText("engine-status", "Checking...");
   setupNote.textContent = "";
 
@@ -419,6 +427,10 @@ async function refreshStatus() {
     } else {
       setText("model-status", `${status.model.present}/${status.model.total} files`, "warn");
     }
+
+    cacheSize = Number(status.cache?.size || 0);
+    setText("cache-status", status.cache?.sizeText || "0 B", cacheSize > 0 ? "ok" : "warn");
+    syncCacheButtonState();
 
     engineReady = Boolean(status.engine.ready);
     const engineLabel = engineStatusLabel(status);
@@ -442,9 +454,37 @@ async function refreshStatus() {
     setText("server-status", "Status API failed", "bad");
     setText("gpu-status", "Not checked", "warn");
     setText("model-status", "Not checked", "warn");
+    setText("cache-status", "Not checked", "warn");
     setText("engine-status", "Not checked", "warn");
+    cacheSize = 0;
+    syncCacheButtonState();
     syncGenerateButtonState();
     setupNote.textContent = statusFailureMessage(error);
+  }
+}
+
+async function clearCache() {
+  if (lastJob && isJobBusy(lastJob)) {
+    return;
+  }
+  if (!window.confirm(`Clear ${document.getElementById("cache-status").textContent} of cache files?`)) {
+    return;
+  }
+
+  clearCacheButton.disabled = true;
+  setText("cache-status", "Clearing...", "warn");
+  try {
+    const response = await fetch("/api/cache", { method: "DELETE" });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const result = await response.json();
+    setupNote.textContent = `Cleared ${result.removedSizeText} of cache files.`;
+    await refreshStatus();
+  } catch (error) {
+    setText("cache-status", "Clear failed", "bad");
+    setupNote.textContent = `Cache clear failed: ${error.message}`;
+    syncCacheButtonState();
   }
 }
 
@@ -479,6 +519,7 @@ dropZone.addEventListener("drop", (event) => {
 });
 
 document.getElementById("refresh-status").addEventListener("click", refreshStatus);
+clearCacheButton.addEventListener("click", clearCache);
 document.getElementById("reset-view").addEventListener("click", resetView);
 levelButton.addEventListener("click", () => {
   const enabled = toggleAutoLevel();
@@ -563,6 +604,7 @@ function startPolling() {
       setExportStatus("Start a new generation to create a fresh export state.", "warn");
       generateButton.disabled = !imageInput.files.length;
       setExportControlsDisabled(false);
+      syncCacheButtonState();
       return;
     }
     await handleJobUpdate(job);

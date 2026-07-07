@@ -65,6 +65,7 @@ else
   conda install -y -n pixal3d pip
 fi
 conda activate pixal3d
+export PIXAL3D_MODELS_DIR="${PIXAL3D_MODELS_DIR:-$HOME/.cache/pixal3d/models}"
 
 python -m pip install --upgrade pip wheel setuptools packaging ninja
 python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
@@ -155,7 +156,7 @@ PY
 fi
 
 cd "$project_root"
-python scripts/download_models.py --skip-existing
+python scripts/download_models.py --models-dir "$PIXAL3D_MODELS_DIR" --skip-existing
 
 python - <<'PY'
 import torch

@@ -137,6 +137,13 @@ select {
   line-height: 1.45;
 }
 
+.status-button {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
 .form {
   display: flex;
   flex-direction: column;
@@ -294,6 +301,7 @@ summary {
 }
 
 .primary-button:disabled,
+.secondary-button:disabled,
 .secondary-button.disabled {
   opacity: 0.45;
   cursor: not-allowed;
