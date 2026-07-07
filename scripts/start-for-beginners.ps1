@@ -153,21 +153,60 @@ function Install-WingetPackage {
     Update-CurrentPath
 }
 
+function Invoke-PythonProbe {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "SilentlyContinue"
+        $output = & $FilePath @Arguments 2>$null
+        $exitCode = $LASTEXITCODE
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($exitCode -ne 0 -or -not $output) {
+        return $null
+    }
+
+    return ($output -join "`n").Trim()
+}
+
+function Test-PythonCandidateReady {
+    param(
+        [string]$FilePath,
+        [string[]]$PrefixArguments = @()
+    )
+
+    $versionCode = "import sys; print(str(sys.version_info[0]) + '.' + str(sys.version_info[1]) + '.' + str(sys.version_info[2]))"
+    $versionText = Invoke-PythonProbe -FilePath $FilePath -Arguments ($PrefixArguments + @("-c", $versionCode))
+    if (-not $versionText) {
+        return $false
+    }
+
+    try {
+        return ([version]$versionText -ge [version]"3.10")
+    } catch {
+        return $false
+    }
+}
+
 function Test-PythonReady {
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3.12 -c "import sys; print(sys.executable)" > $null 2> $null
-        if ($LASTEXITCODE -eq 0) {
-            return $true
+        foreach ($versionArg in @("-3.12", "-3.11", "-3.10", "-3")) {
+            if (Test-PythonCandidateReady -FilePath "py" -PrefixArguments @($versionArg)) {
+                return $true
+            }
         }
     }
     if (Get-Command python -ErrorAction SilentlyContinue) {
-        $versionText = (& python -c "import sys; print(str(sys.version_info[0]) + '.' + str(sys.version_info[1]) + '.' + str(sys.version_info[2]))" 2> $null)
-        if ($LASTEXITCODE -eq 0 -and $versionText) {
-            try {
-                return ([version]($versionText -join "").Trim() -ge [version]"3.10")
-            } catch {
-                return $false
-            }
+        if (Test-PythonCandidateReady -FilePath "python") {
+            return $true
         }
     }
     return $false
@@ -276,6 +315,12 @@ function Setup-WindowsUi {
     Write-Step "Installing Windows UI dependencies and downloading vendor/Pixal3D plus vendor/TRELLIS.2 if missing."
     Write-Host "This creates .venv, installs Python packages from requirements-app.txt, and runs npm install."
     & (Join-Path $Root "scripts\setup-app.ps1")
+}
+
+function Setup-ModelFiles {
+    Write-Step "Downloading Pixal3D model files if missing."
+    Write-Host "This downloads the official Pixal3D checkpoints and helper models into models/. The main checkpoint set is about 22 GB and interrupted downloads can be resumed."
+    & (Join-Path $Root "scripts\download-models.ps1")
 }
 
 function Test-WslInstalled {
@@ -399,6 +444,7 @@ function Setup-WslBackend {
 
     if (Test-WslBackendReady) {
         Write-Host "WSL/CUDA backend is already ready."
+        Setup-ModelFiles
         return $true
     }
 
@@ -419,6 +465,7 @@ function Setup-WslBackend {
         return $false
     }
 
+    Setup-ModelFiles
     return $true
 }
 
@@ -426,9 +473,11 @@ function Start-Pixal3D {
     param([string]$Backend)
 
     Write-Step "Starting Pixal3D and opening the local HTML page."
-    $arguments = @("-Backend", $Backend)
+    $arguments = @{
+        Backend = $Backend
+    }
     if ($NoBrowser) {
-        $arguments += "-NoBrowser"
+        $arguments.NoBrowser = $true
     }
     & (Join-Path $Root "launch.ps1") @arguments
 }

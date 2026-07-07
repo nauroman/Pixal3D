@@ -2,6 +2,21 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+function Invoke-CheckedCommand {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+
+    Write-Host ""
+    Write-Host "> $FilePath $($Arguments -join ' ')" -ForegroundColor DarkGray
+    & $FilePath @Arguments
+    $exitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+    if ($exitCode -ne 0) {
+        throw "Command failed with exit code $exitCode`: $FilePath $($Arguments -join ' ')"
+    }
+}
+
 function Get-WslPath {
     param([string]$WindowsPath)
 
@@ -10,6 +25,12 @@ function Get-WslPath {
         throw "Could not convert Windows path to WSL path: $WindowsPath"
     }
     return ($output -join "`n").Trim()
+}
+
+if (-not (Test-Path (Join-Path $Root "vendor\Pixal3D\requirements-hfdemo.txt")) -or
+    -not (Test-Path (Join-Path $Root "vendor\TRELLIS.2\.git"))) {
+    Write-Host "Vendor repositories are missing. Downloading vendor/Pixal3D and vendor/TRELLIS.2 first."
+    & (Join-Path $Root "scripts\setup-app.ps1")
 }
 
 $wslStatus = wsl --list --verbose 2>&1
@@ -155,4 +176,4 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText($SetupScriptPath, $bash.Replace("`r`n", "`n"), $Utf8NoBom)
 $WslScriptPath = Get-WslPath $SetupScriptPath
 
-wsl.exe --exec bash "$WslScriptPath"
+Invoke-CheckedCommand -FilePath "wsl.exe" -Arguments @("--exec", "bash", $WslScriptPath)

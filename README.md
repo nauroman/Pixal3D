@@ -43,7 +43,7 @@ Choose `2` if you only want to open the local page quickly and check the interfa
 `START_PIXAL3D.bat` checks and installs these items when needed:
 
 - Git, used to download the official Pixal3D and TRELLIS.2 sources into `vendor/`.
-- Python 3.12, used by the local FastAPI server.
+- Python 3.10 or newer, used by the local FastAPI server. The launcher installs Python 3.12 when a usable Python is missing.
 - Node.js LTS / npm, used to install the Three.js viewer dependency.
 - Python virtual environment `.venv`.
 - Python dependencies from `requirements-app.txt`.

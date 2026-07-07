@@ -107,7 +107,10 @@ def _human_size(size: int) -> str:
 
 def _pixal3d_model_dir() -> Path:
     local = MODELS_DIR / "Pixal3D"
-    return local if (local / "pipeline.json").exists() else MODELS_DIR / "TencentARC" / "Pixal3D"
+    legacy = MODELS_DIR / "TencentARC" / "Pixal3D"
+    if (local / "pipeline.json").exists() or not (legacy / "pipeline.json").exists():
+        return local
+    return legacy
 
 
 def _model_status() -> dict[str, Any]:
