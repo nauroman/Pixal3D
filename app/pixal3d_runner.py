@@ -244,6 +244,30 @@ def get_camera_params_wild_moge(image_path, moge_model, device="cuda", mesh_scal
     return {"camera_angle_x": camera_angle_x, "distance": distance, "mesh_scale": mesh_scale}
 
 
+def fallback_preprocess_image(image: Image.Image, bg_color: tuple[int, int, int] = (0, 0, 0), max_size: int = 1024) -> Image.Image:
+    source = image.convert("RGB")
+    side = max(source.size)
+    canvas = Image.new("RGB", (side, side), bg_color)
+    offset = ((side - source.width) // 2, (side - source.height) // 2)
+    canvas.paste(source, offset)
+    if side > max_size:
+        canvas = canvas.resize((max_size, max_size), Image.Resampling.LANCZOS)
+    return canvas
+
+
+def preprocess_image_with_fallback(pipeline, image: Image.Image) -> Image.Image:
+    try:
+        return pipeline.preprocess_image(image)
+    except ValueError as exc:
+        if "zero-size array to reduction operation minimum which has no identity" not in str(exc):
+            raise
+        print(
+            "[Preprocess] Background removal found no foreground object; "
+            "using centered full-image fallback."
+        )
+        return fallback_preprocess_image(image)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local Pixal3D runner")
     parser.add_argument("--pixal3d-dir", required=True)
@@ -425,7 +449,7 @@ def main() -> int:
 
     print(f"[Inference] Processing image: {args.image}")
     image = Image.open(args.image)
-    image_preprocessed = pipeline.preprocess_image(image)
+    image_preprocessed = preprocess_image_with_fallback(pipeline, image)
     output_path = Path(args.output).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_path.parent / f"_tmp_preprocessed_{int(time.time() * 1000)}.png"
